@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'screens/auth/login_screen.dart';
 
 void main() {
   runApp(const ProductivityManagerApp());
@@ -15,16 +16,11 @@ class ProductivityManagerApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         fontFamily: 'Roboto',
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4F46E5)),
-      ),
-      home: const Scaffold(
-        body: Center(
-          child: Text(
-            'Productivity Manager Ready!',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-          ),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF4F46E5),
         ),
       ),
+      home: const LoginScreen(),
     );
   }
 }
