@@ -6,6 +6,10 @@ import '../../data/mock_tasks.dart';
 import '../auth/login_screen.dart';
 import 'admin_user_management_screen.dart';
 import 'admin_workspace_management_screen.dart';
+import 'admin_project_management_screen.dart';
+import 'admin_task_management_screen.dart';
+import 'admin_activity_log_screen.dart';
+import 'admin_approval_project_selection_screen.dart';
 
 class AdminDashboardScreen extends StatelessWidget {
   final MockUser admin;
@@ -145,20 +149,45 @@ class AdminDashboardScreen extends StatelessWidget {
                       _AdminMenuTile(
                         icon: Icons.folder_open_outlined,
                         title: 'Quản lý Project',
-                        subtitle: 'Theo dõi dự án, deadline và tiến độ',
+                        subtitle: 'Xem, tạo, sửa, archive và xóa project',
                         color: const Color(0xFFF59E0B),
                         onTap: () {
-                          _showMockMessage(context, 'Quản lý Project');
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminProjectManagementScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      const Divider(height: 1),
+                      _AdminMenuTile(
+                        icon: Icons.task_alt_outlined,
+                        title: 'Quản lý Task',
+                        subtitle: 'Xem toàn bộ task, lọc và đổi trạng thái',
+                        color: const Color(0xFF2563EB),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminTaskManagementScreen(),
+                            ),
+                          );
                         },
                       ),
                       const Divider(height: 1),
                       _AdminMenuTile(
                         icon: Icons.fact_check_outlined,
                         title: 'Duyệt yêu cầu kỹ thuật',
-                        subtitle: 'Xem các yêu cầu đang chờ duyệt',
+                        subtitle: 'Chọn project để duyệt yêu cầu của nhân viên',
                         color: const Color(0xFF22C55E),
                         onTap: () {
-                          _showMockMessage(context, 'Duyệt yêu cầu kỹ thuật');
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminApprovalProjectSelectionScreen(),
+                            ),
+                          );
                         },
                       ),
                       const Divider(height: 1),
@@ -168,7 +197,12 @@ class AdminDashboardScreen extends StatelessWidget {
                         subtitle: 'Theo dõi hoạt động của thành viên',
                         color: const Color(0xFFEF4444),
                         onTap: () {
-                          _showMockMessage(context, 'Activity Log');
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminActivityLogScreen(),
+                            ),
+                          );
                         },
                       ),
                     ],
