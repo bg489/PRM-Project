@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_tasks.dart';
+import '../../data/mock_users.dart';
+import '../../utils/role_permissions.dart';
 
 class TaskDetailScreen extends StatefulWidget {
   final MockTask task;
+  final MockUser? currentUser;
 
   const TaskDetailScreen({
     super.key,
     required this.task,
+    this.currentUser,
   });
 
   @override
@@ -20,7 +24,13 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
 
   final TextEditingController commentController = TextEditingController();
 
-  bool managerMode = true;
+  bool get canApproveRequirement {
+    final user = widget.currentUser;
+
+    if (user == null) return false;
+
+    return RolePermissions.canApproveRequirements(user);
+  }
 
   @override
   void initState() {
@@ -238,33 +248,33 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                     _SectionCard(
                       title: 'Yêu cầu kỹ thuật từ Quản lý',
                       icon: Icons.verified_user_outlined,
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            'Manager',
-                            style: TextStyle(
-                              color: Color(0xFF6B7280),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: canApproveRequirement
+                              ? const Color(0xFFEDE9FE)
+                              : const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          canApproveRequirement ? 'Manager/Admin' : 'Member',
+                          style: TextStyle(
+                            color: canApproveRequirement
+                                ? const Color(0xFF6D28D9)
+                                : const Color(0xFF6B7280),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12,
                           ),
-                          Switch(
-                            value: managerMode,
-                            activeColor: const Color(0xFF7C3AED),
-                            onChanged: (value) {
-                              setState(() {
-                                managerMode = value;
-                              });
-                            },
-                          ),
-                        ],
+                        ),
                       ),
                       child: Column(
                         children: List.generate(requirements.length, (index) {
                           return _RequirementTile(
                             requirement: requirements[index],
-                            managerMode: managerMode,
+                            managerMode: canApproveRequirement,
                             onSubmit: () => submitRequirement(index),
                             onApprove: () => approveRequirement(index),
                             onReject: () => rejectRequirement(index),

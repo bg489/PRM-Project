@@ -10,6 +10,7 @@ import '../profile/profile_settings_screen.dart';
 import 'board_configuration_screen.dart';
 import '../approval/requirements_approval_screen.dart';
 import '../../utils/app_navigation.dart';
+import '../../utils/role_permissions.dart';
 
 class ProjectBoardScreen extends StatefulWidget {
   final MockProject project;
@@ -57,7 +58,10 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => TaskDetailScreen(task: task),
+        builder: (_) => TaskDetailScreen(
+          task: task,
+          currentUser: widget.user,
+        ),
       ),
     );
   }
@@ -144,12 +148,14 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: RolePermissions.canCreateTask(widget.user)
+          ? FloatingActionButton(
         onPressed: openCreateTaskScreen,
         backgroundColor: const Color(0xFF7C3AED),
         foregroundColor: Colors.white,
         child: const Icon(Icons.add_rounded, size: 30),
-      ),
+      )
+          : null,
       bottomNavigationBar: _BoardBottomNavBar(
         onCalendarTap: openCalendarScreen,
         onAnalyticsTap: openAnalyticsScreen,
@@ -166,6 +172,8 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
               onBack: () => Navigator.pop(context),
               onSettingsTap: openBoardConfigurationScreen,
               onApprovalTap: openRequirementsApprovalScreen,
+              canConfigureBoard: RolePermissions.canManageBoard(widget.user),
+              canApproveRequirements: RolePermissions.canApproveRequirements(widget.user),
             ),
             const SizedBox(height: 16),
 
@@ -278,6 +286,15 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
                                 itemBuilder: (context, taskIndex) {
                                   final task = columnTasks[taskIndex];
 
+                                  final taskWidget = GestureDetector(
+                                    onTap: () => openTaskDetail(task),
+                                    child: _TaskCard(task: task),
+                                  );
+
+                                  if (!RolePermissions.canManageBoard(widget.user)) {
+                                    return taskWidget;
+                                  }
+
                                   return LongPressDraggable<MockTask>(
                                     data: task,
                                     feedback: Material(
@@ -294,10 +311,7 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
                                       opacity: 0.35,
                                       child: _TaskCard(task: task),
                                     ),
-                                    child: GestureDetector(
-                                      onTap: () => openTaskDetail(task),
-                                      child: _TaskCard(task: task),
-                                    ),
+                                    child: taskWidget,
                                   );
                                 },
                               ),
@@ -325,6 +339,8 @@ class _BoardHeader extends StatelessWidget {
   final VoidCallback onBack;
   final VoidCallback onSettingsTap;
   final VoidCallback onApprovalTap;
+  final bool canConfigureBoard;
+  final bool canApproveRequirements;
 
   const _BoardHeader({
     required this.projectName,
@@ -334,6 +350,8 @@ class _BoardHeader extends StatelessWidget {
     required this.onBack,
     required this.onSettingsTap,
     required this.onApprovalTap,
+    required this.canConfigureBoard,
+    required this.canApproveRequirements,
   });
 
   @override
@@ -400,66 +418,70 @@ class _BoardHeader extends StatelessWidget {
                   ],
                 ),
               ),
-              InkWell(
-                onTap: onApprovalTap,
-                borderRadius: BorderRadius.circular(14),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.16),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Icon(
-                        Icons.fact_check_rounded,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Positioned(
-                      top: -6,
-                      right: -6,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
+              if (canApproveRequirements) ...[
+                InkWell(
+                  onTap: onApprovalTap,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF97316),
-                          borderRadius: BorderRadius.circular(999),
+                          color: Colors.white.withOpacity(0.16),
+                          borderRadius: BorderRadius.circular(14),
                         ),
-                        child: const Text(
-                          '3',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
+                        child: const Icon(
+                          Icons.fact_check_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Positioned(
+                        top: -6,
+                        right: -6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF97316),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            '3',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+
+              if (canConfigureBoard)
+                InkWell(
+                  onTap: onSettingsTap,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              InkWell(
-                onTap: onSettingsTap,
-                borderRadius: BorderRadius.circular(14),
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.16),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(
-                    Icons.tune_rounded,
-                    color: Colors.white,
+                    child: const Icon(
+                      Icons.tune_rounded,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 18),

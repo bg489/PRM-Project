@@ -8,6 +8,9 @@ import '../../data/mock_tasks.dart';
 import '../calendar/calendar_view_screen.dart';
 import '../analytics/productivity_analytics_screen.dart';
 import '../profile/profile_settings_screen.dart';
+import '../user/my_tasks_screen.dart';
+import '../../utils/role_permissions.dart';
+import '../user/user_notifications_screen.dart';
 
 class WorkspaceDashboardScreen extends StatefulWidget {
   final MockUser user;
@@ -97,27 +100,28 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
             ),
           ),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(999),
-                ),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 42,
+              height: 5,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE5E7EB),
+                borderRadius: BorderRadius.circular(999),
               ),
-              const SizedBox(height: 18),
-              const Text(
-                'Bạn muốn tạo gì?',
-                style: TextStyle(
-                  color: Color(0xFF111827),
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'Bạn muốn tạo gì?',
+              style: TextStyle(
+                color: Color(0xFF111827),
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
               ),
-              const SizedBox(height: 16),
+            ),
+            const SizedBox(height: 16),
 
+            if (RolePermissions.canCreateWorkspace(widget.user))
               ListTile(
                 leading: Container(
                   width: 46,
@@ -135,15 +139,14 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
                   'Tạo workspace',
                   style: TextStyle(fontWeight: FontWeight.w900),
                 ),
-                subtitle: const Text('Tạo không gian làm việc mới'),
+                subtitle: const Text('Chỉ Admin được tạo workspace'),
                 onTap: () {
                   Navigator.pop(bottomSheetContext);
                   openCreateWorkspaceScreen();
                 },
               ),
 
-              const SizedBox(height: 8),
-
+            if (RolePermissions.canCreateProject(widget.user))
               ListTile(
                 leading: Container(
                   width: 46,
@@ -161,14 +164,14 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
                   'Tạo dự án',
                   style: TextStyle(fontWeight: FontWeight.w900),
                 ),
-                subtitle: const Text('Tạo dự án trong workspace đang chọn'),
+                subtitle: const Text('Manager/Admin được tạo dự án'),
                 onTap: () {
                   Navigator.pop(bottomSheetContext);
                   openCreateProjectScreen();
                 },
               ),
-            ],
-          ),
+          ],
+        ),
         );
       },
     );
@@ -182,12 +185,15 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
         .toList();
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: RolePermissions.canCreateProject(widget.user) ||
+          RolePermissions.canCreateWorkspace(widget.user)
+          ? FloatingActionButton(
         onPressed: openCreateMenu,
         backgroundColor: const Color(0xFF7C3AED),
         foregroundColor: Colors.white,
         child: const Icon(Icons.add_rounded, size: 30),
-      ),
+      )
+          : null,
       bottomNavigationBar: _BottomNavBar(
         onBoardTap: () {
           if (workspaceProjects.isEmpty) {
@@ -292,7 +298,29 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Header(user: widget.user),
+              _Header(
+                user: widget.user,
+                onMyTasksTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MyTasksScreen(
+                        user: widget.user,
+                      ),
+                    ),
+                  );
+                },
+                onNotificationsTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => UserNotificationsScreen(
+                        user: widget.user,
+                      ),
+                    ),
+                  );
+                },
+              ),
               const SizedBox(height: 18),
 
               Padding(
@@ -406,9 +434,13 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
 
 class _Header extends StatelessWidget {
   final MockUser user;
+  final VoidCallback onMyTasksTap;
+  final VoidCallback onNotificationsTap;
 
   const _Header({
     required this.user,
+    required this.onMyTasksTap,
+    required this.onNotificationsTap,
   });
 
   @override
@@ -469,13 +501,13 @@ class _Header extends StatelessWidget {
           _HeaderIcon(
             icon: Icons.task_alt_rounded,
             badgeText: '3',
-            onTap: () {},
+            onTap: onMyTasksTap,
           ),
           const SizedBox(width: 10),
           _HeaderIcon(
             icon: Icons.notifications_none_rounded,
-            badgeText: '2',
-            onTap: () {},
+            badgeText: '3',
+            onTap: onNotificationsTap,
           ),
         ],
       ),
