@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_tasks.dart';
 import '../../data/mock_workspaces.dart';
+import '../task/task_detail_screen.dart';
+import '../task/create_edit_task_screen.dart';
+import '../calendar/calendar_view_screen.dart';
 
 class ProjectBoardScreen extends StatefulWidget {
   final MockProject project;
@@ -42,6 +45,51 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
     );
   }
 
+  void openTaskDetail(MockTask task) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TaskDetailScreen(task: task),
+      ),
+    );
+  }
+
+  Future<void> openCreateTaskScreen() async {
+    final newTask = await Navigator.push<MockTask>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CreateEditTaskScreen(
+          projectId: widget.project.id,
+        ),
+      ),
+    );
+
+    if (newTask == null) return;
+
+    setState(() {
+      tasks = [newTask, ...tasks];
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Đã tạo task "${newTask.title}"'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void openCalendarScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CalendarViewScreen(
+          project: widget.project,
+          tasks: tasks,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final totalTasks = tasks.length;
@@ -50,12 +98,14 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {},
+        onPressed: openCreateTaskScreen,
         backgroundColor: const Color(0xFF7C3AED),
         foregroundColor: Colors.white,
         child: const Icon(Icons.add_rounded, size: 30),
       ),
-      bottomNavigationBar: const _BoardBottomNavBar(),
+      bottomNavigationBar: _BoardBottomNavBar(
+        onCalendarTap: openCalendarScreen,
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -193,7 +243,10 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
                                       opacity: 0.35,
                                       child: _TaskCard(task: task),
                                     ),
-                                    child: _TaskCard(task: task),
+                                    child: GestureDetector(
+                                      onTap: () => openTaskDetail(task),
+                                      child: _TaskCard(task: task),
+                                    ),
                                   );
                                 },
                               ),
@@ -677,7 +730,11 @@ class _EmptyColumn extends StatelessWidget {
 }
 
 class _BoardBottomNavBar extends StatelessWidget {
-  const _BoardBottomNavBar();
+  final VoidCallback onCalendarTap;
+
+  const _BoardBottomNavBar({
+    required this.onCalendarTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -686,6 +743,11 @@ class _BoardBottomNavBar extends StatelessWidget {
       height: 72,
       backgroundColor: Colors.white,
       indicatorColor: const Color(0xFFEDE9FE),
+      onDestinationSelected: (index) {
+        if (index == 2) {
+          onCalendarTap();
+        }
+      },
       destinations: const [
         NavigationDestination(
           icon: Icon(Icons.home_outlined),
