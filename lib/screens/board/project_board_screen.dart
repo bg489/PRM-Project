@@ -4,13 +4,21 @@ import '../../data/mock_workspaces.dart';
 import '../task/task_detail_screen.dart';
 import '../task/create_edit_task_screen.dart';
 import '../calendar/calendar_view_screen.dart';
+import '../analytics/productivity_analytics_screen.dart';
+import '../../data/mock_users.dart';
+import '../profile/profile_settings_screen.dart';
+import 'board_configuration_screen.dart';
+import '../approval/requirements_approval_screen.dart';
+import '../../utils/app_navigation.dart';
 
 class ProjectBoardScreen extends StatefulWidget {
   final MockProject project;
+  final MockUser user;
 
   const ProjectBoardScreen({
     super.key,
     required this.project,
+    required this.user,
   });
 
   @override
@@ -79,10 +87,49 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
   }
 
   void openCalendarScreen() {
+    AppNavigation.goCalendar(
+      context: context,
+      user: widget.user,
+      project: widget.project,
+      tasks: tasks,
+    );
+  }
+
+  void openAnalyticsScreen() {
+    AppNavigation.goAnalytics(
+      context: context,
+      user: widget.user,
+      project: widget.project,
+      tasks: tasks,
+    );
+  }
+
+  void openProfileScreen() {
+    AppNavigation.goProfile(
+      context: context,
+      user: widget.user,
+      project: widget.project,
+      tasks: tasks,
+    );
+  }
+
+  void openBoardConfigurationScreen() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => CalendarViewScreen(
+        builder: (_) => BoardConfigurationScreen(
+          project: widget.project,
+          tasks: tasks,
+        ),
+      ),
+    );
+  }
+
+  void openRequirementsApprovalScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RequirementsApprovalScreen(
           project: widget.project,
           tasks: tasks,
         ),
@@ -105,6 +152,8 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
       ),
       bottomNavigationBar: _BoardBottomNavBar(
         onCalendarTap: openCalendarScreen,
+        onAnalyticsTap: openAnalyticsScreen,
+        onProfileTap: openProfileScreen,
       ),
       body: SafeArea(
         child: Column(
@@ -115,6 +164,8 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
               totalTasks: totalTasks,
               doneTasks: doneTasks,
               onBack: () => Navigator.pop(context),
+              onSettingsTap: openBoardConfigurationScreen,
+              onApprovalTap: openRequirementsApprovalScreen,
             ),
             const SizedBox(height: 16),
 
@@ -272,6 +323,8 @@ class _BoardHeader extends StatelessWidget {
   final int totalTasks;
   final int doneTasks;
   final VoidCallback onBack;
+  final VoidCallback onSettingsTap;
+  final VoidCallback onApprovalTap;
 
   const _BoardHeader({
     required this.projectName,
@@ -279,6 +332,8 @@ class _BoardHeader extends StatelessWidget {
     required this.totalTasks,
     required this.doneTasks,
     required this.onBack,
+    required this.onSettingsTap,
+    required this.onApprovalTap,
   });
 
   @override
@@ -345,16 +400,64 @@ class _BoardHeader extends StatelessWidget {
                   ],
                 ),
               ),
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(14),
+              InkWell(
+                onTap: onApprovalTap,
+                borderRadius: BorderRadius.circular(14),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.16),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.fact_check_rounded,
+                        color: Colors.white,
+                      ),
+                    ),
+                    Positioned(
+                      top: -6,
+                      right: -6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF97316),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: const Text(
+                          '3',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                child: const Icon(
-                  Icons.more_horiz_rounded,
-                  color: Colors.white,
+              ),
+              const SizedBox(width: 10),
+              InkWell(
+                onTap: onSettingsTap,
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.16),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.tune_rounded,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ],
@@ -731,9 +834,13 @@ class _EmptyColumn extends StatelessWidget {
 
 class _BoardBottomNavBar extends StatelessWidget {
   final VoidCallback onCalendarTap;
+  final VoidCallback onAnalyticsTap;
+  final VoidCallback onProfileTap;
 
   const _BoardBottomNavBar({
     required this.onCalendarTap,
+    required this.onAnalyticsTap,
+    required this.onProfileTap,
   });
 
   @override
@@ -744,8 +851,24 @@ class _BoardBottomNavBar extends StatelessWidget {
       backgroundColor: Colors.white,
       indicatorColor: const Color(0xFFEDE9FE),
       onDestinationSelected: (index) {
+        if (index == 0) {
+          AppNavigation.goHome(context);
+        }
+
+        if (index == 1) {
+          return;
+        }
+
         if (index == 2) {
           onCalendarTap();
+        }
+
+        if (index == 3) {
+          onAnalyticsTap();
+        }
+
+        if (index == 4) {
+          onProfileTap();
         }
       },
       destinations: const [

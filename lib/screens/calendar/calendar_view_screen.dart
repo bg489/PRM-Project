@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_tasks.dart';
 import '../../data/mock_workspaces.dart';
+import '../../data/mock_users.dart';
+import '../../utils/app_navigation.dart';
 
 class CalendarViewScreen extends StatefulWidget {
+  final MockUser user;
   final MockProject project;
   final List<MockTask> tasks;
 
   const CalendarViewScreen({
     super.key,
+    required this.user,
     required this.project,
     required this.tasks,
   });
@@ -103,7 +107,11 @@ class _CalendarViewScreenState extends State<CalendarViewScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
-      bottomNavigationBar: const _CalendarBottomNavBar(),
+      bottomNavigationBar: _CalendarBottomNavBar(
+        user: widget.user,
+        project: widget.project,
+        tasks: widget.tasks,
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -925,7 +933,15 @@ class _EmptySelectedDate extends StatelessWidget {
 }
 
 class _CalendarBottomNavBar extends StatelessWidget {
-  const _CalendarBottomNavBar();
+  final MockUser user;
+  final MockProject project;
+  final List<MockTask> tasks;
+
+  const _CalendarBottomNavBar({
+    required this.user,
+    required this.project,
+    required this.tasks,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -934,6 +950,41 @@ class _CalendarBottomNavBar extends StatelessWidget {
       height: 72,
       backgroundColor: Colors.white,
       indicatorColor: const Color(0xFFEDE9FE),
+      onDestinationSelected: (index) {
+        if (index == 0) {
+          AppNavigation.goHome(context);
+        }
+
+        if (index == 1) {
+          AppNavigation.goBoard(
+            context: context,
+            user: user,
+            project: project,
+          );
+        }
+
+        if (index == 2) {
+          return;
+        }
+
+        if (index == 3) {
+          AppNavigation.goAnalytics(
+            context: context,
+            user: user,
+            project: project,
+            tasks: tasks,
+          );
+        }
+
+        if (index == 4) {
+          AppNavigation.goProfile(
+            context: context,
+            user: user,
+            project: project,
+            tasks: tasks,
+          );
+        }
+      },
       destinations: const [
         NavigationDestination(
           icon: Icon(Icons.home_outlined),

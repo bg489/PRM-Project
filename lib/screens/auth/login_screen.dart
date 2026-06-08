@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../data/mock_users.dart';
 import '../dashboard/workspace_dashboard_screen.dart';
+import '../admin/admin_dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -49,6 +50,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (user == null) {
       showMessage('Email hoặc mật khẩu không chính xác');
+      return;
+    }
+
+    if (user.role == 'Admin') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AdminDashboardScreen(admin: user),
+        ),
+      );
       return;
     }
 

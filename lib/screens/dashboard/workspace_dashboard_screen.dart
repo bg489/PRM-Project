@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import '../../data/mock_users.dart';
 import '../../data/mock_workspaces.dart';
 import '../board/project_board_screen.dart';
+import 'create_workspace_screen.dart';
+import 'create_project_screen.dart';
+import '../../data/mock_tasks.dart';
+import '../calendar/calendar_view_screen.dart';
+import '../analytics/productivity_analytics_screen.dart';
+import '../profile/profile_settings_screen.dart';
 
 class WorkspaceDashboardScreen extends StatefulWidget {
   final MockUser user;
@@ -18,21 +24,268 @@ class WorkspaceDashboardScreen extends StatefulWidget {
 
 class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
   int selectedWorkspaceIndex = 0;
+  List<MockWorkspace> workspaces = List.from(mockWorkspaces);
+  List<MockProject> allProjects = List.from(mockProjects);
+  @override
+  void initState() {
+    super.initState();
+    workspaces = List.from(mockWorkspaces);
+  }
+
+  Future<void> openCreateWorkspaceScreen() async {
+    final newWorkspace = await Navigator.push<MockWorkspace>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const CreateWorkspaceScreen(),
+      ),
+    );
+
+    if (newWorkspace == null) return;
+
+    setState(() {
+      workspaces.add(newWorkspace);
+      selectedWorkspaceIndex = workspaces.length - 1;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Đã tạo workspace "${newWorkspace.name}"'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> openCreateProjectScreen() async {
+    final selectedWorkspace = workspaces[selectedWorkspaceIndex];
+
+    final newProject = await Navigator.push<MockProject>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CreateProjectScreen(
+          workspaceId: selectedWorkspace.id,
+          workspaceName: selectedWorkspace.name,
+        ),
+      ),
+    );
+
+    if (newProject == null) return;
+
+    setState(() {
+      allProjects.add(newProject);
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Đã tạo dự án "${newProject.name}"'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void openCreateMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (bottomSheetContext) {
+        return Container(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(28),
+              topRight: Radius.circular(28),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 42,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE5E7EB),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Bạn muốn tạo gì?',
+                style: TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              ListTile(
+                leading: Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEDE9FE),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.workspaces_rounded,
+                    color: Color(0xFF7C3AED),
+                  ),
+                ),
+                title: const Text(
+                  'Tạo workspace',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                subtitle: const Text('Tạo không gian làm việc mới'),
+                onTap: () {
+                  Navigator.pop(bottomSheetContext);
+                  openCreateWorkspaceScreen();
+                },
+              ),
+
+              const SizedBox(height: 8),
+
+              ListTile(
+                leading: Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDBEAFE),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.folder_open_rounded,
+                    color: Color(0xFF2563EB),
+                  ),
+                ),
+                title: const Text(
+                  'Tạo dự án',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                subtitle: const Text('Tạo dự án trong workspace đang chọn'),
+                onTap: () {
+                  Navigator.pop(bottomSheetContext);
+                  openCreateProjectScreen();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final selectedWorkspace = mockWorkspaces[selectedWorkspaceIndex];
-    final projects = getProjectsByWorkspace(selectedWorkspace.id);
-
+    final selectedWorkspace = workspaces[selectedWorkspaceIndex];
+    final workspaceProjects = allProjects
+        .where((project) => project.workspaceId == selectedWorkspace.id)
+        .toList();
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {},
+        onPressed: openCreateMenu,
         backgroundColor: const Color(0xFF7C3AED),
         foregroundColor: Colors.white,
         child: const Icon(Icons.add_rounded, size: 30),
       ),
-      bottomNavigationBar: _BottomNavBar(),
+      bottomNavigationBar: _BottomNavBar(
+        onBoardTap: () {
+          if (workspaceProjects.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Workspace này chưa có dự án để mở bảng'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+            return;
+          }
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ProjectBoardScreen(
+                project: workspaceProjects.first,
+                user: widget.user,
+              ),
+            ),
+          );
+        },
+        onCalendarTap: () {
+          if (workspaceProjects.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Workspace này chưa có dự án để xem lịch'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+            return;
+          }
+
+          final project = workspaceProjects.first;
+          final tasks = getTasksByProject(project.id);
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CalendarViewScreen(
+                user: widget.user,
+                project: project,
+                tasks: tasks,
+              ),
+            ),
+          );
+        },
+        onAnalyticsTap: () {
+          if (workspaceProjects.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Workspace này chưa có dự án để xem phân tích'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+            return;
+          }
+
+          final project = workspaceProjects.first;
+          final tasks = getTasksByProject(project.id);
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ProductivityAnalyticsScreen(
+                user: widget.user,
+                project: project,
+                tasks: tasks,
+              ),
+            ),
+          );
+        },
+        onProfileTap: () {
+          if (workspaceProjects.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Workspace này chưa có dự án để xem hồ sơ dự án'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+            return;
+          }
+
+          final project = workspaceProjects.first;
+          final tasks = getTasksByProject(project.id);
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ProfileSettingsScreen(
+                user: widget.user,
+                project: project,
+                tasks: tasks,
+              ),
+            ),
+          );
+        },
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: 90),
@@ -58,10 +311,10 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: mockWorkspaces.length,
+                itemCount: workspaces.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
-                  final workspace = mockWorkspaces[index];
+                  final workspace = workspaces[index];
                   final isSelected = selectedWorkspaceIndex == index;
 
                   return GestureDetector(
@@ -73,6 +326,9 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
                     child: _WorkspaceCard(
                       workspace: workspace,
                       isSelected: isSelected,
+                      projectCount: allProjects
+                          .where((project) => project.workspaceId == workspace.id)
+                          .length,
                     ),
                   );
                 },
@@ -103,7 +359,7 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        '${projects.length} dự án',
+                        '${workspaceProjects.length} dự án',
                         style: const TextStyle(
                           color: Color(0xFF6D28D9),
                           fontWeight: FontWeight.w700,
@@ -121,17 +377,18 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: projects.length,
+                itemCount: workspaceProjects.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 16),
                 itemBuilder: (context, index) {
                   return _ProjectCard(
-                    project: projects[index],
+                    project: workspaceProjects[index],
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (_) => ProjectBoardScreen(
-                            project: projects[index],
+                            project: workspaceProjects[index],
+                            user: widget.user,
                           ),
                         ),
                       );
@@ -286,10 +543,12 @@ class _HeaderIcon extends StatelessWidget {
 class _WorkspaceCard extends StatelessWidget {
   final MockWorkspace workspace;
   final bool isSelected;
+  final int projectCount;
 
   const _WorkspaceCard({
     required this.workspace,
     required this.isSelected,
+    required this.projectCount,
   });
 
   @override
@@ -378,7 +637,7 @@ class _WorkspaceCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      '${workspace.projectCount} dự án',
+                      '$projectCount dự án',
                       style: const TextStyle(
                         color: Color(0xFF6B7280),
                         fontSize: 13,
@@ -569,6 +828,18 @@ class _ProjectCard extends StatelessWidget {
 }
 
 class _BottomNavBar extends StatelessWidget {
+  final VoidCallback onBoardTap;
+  final VoidCallback onCalendarTap;
+  final VoidCallback onAnalyticsTap;
+  final VoidCallback onProfileTap;
+
+  const _BottomNavBar({
+    required this.onBoardTap,
+    required this.onCalendarTap,
+    required this.onAnalyticsTap,
+    required this.onProfileTap,
+  });
+
   @override
   Widget build(BuildContext context) {
     return NavigationBar(
@@ -576,6 +847,27 @@ class _BottomNavBar extends StatelessWidget {
       height: 72,
       backgroundColor: Colors.white,
       indicatorColor: const Color(0xFFEDE9FE),
+      onDestinationSelected: (index) {
+        if (index == 0) {
+          return;
+        }
+
+        if (index == 1) {
+          onBoardTap();
+        }
+
+        if (index == 2) {
+          onCalendarTap();
+        }
+
+        if (index == 3) {
+          onAnalyticsTap();
+        }
+
+        if (index == 4) {
+          onProfileTap();
+        }
+      },
       destinations: const [
         NavigationDestination(
           icon: Icon(Icons.home_outlined),
