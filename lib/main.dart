@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'screens/auth/login_screen.dart';
+import 'utils/app_notification_service.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await AppNotificationService.init();
+
   runApp(const ProductivityManagerApp());
 }
 

@@ -37,6 +37,8 @@ dependencies:
   image_picker: ^1.2.2
   crop_your_image: ^2.0.0
   file_picker: ^11.0.2
+  flutter_local_notifications: ^22.0.0
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:

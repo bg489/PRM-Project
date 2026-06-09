@@ -5,6 +5,9 @@ import '../../data/mock_workspaces.dart';
 import '../auth/login_screen.dart';
 import '../../utils/app_navigation.dart';
 import '../user/edit_profile_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../utils/app_notification_service.dart';
 
 class ProfileSettingsScreen extends StatefulWidget {
   final MockUser user;
@@ -23,6 +26,9 @@ class ProfileSettingsScreen extends StatefulWidget {
 }
 
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
+  static const String notificationSettingKey =
+      'productivity_manager_notification_enabled';
+
   bool notificationEnabled = true;
   bool darkModeEnabled = false;
   late MockUser currentUser;
@@ -31,6 +37,76 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   void initState() {
     super.initState();
     currentUser = widget.user;
+    loadNotificationSetting();
+  }
+
+  Future<void> loadNotificationSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (!mounted) return;
+
+    setState(() {
+      notificationEnabled = prefs.getBool(notificationSettingKey) ?? true;
+    });
+  }
+
+  Future<void> updateNotificationSetting(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (value) {
+      final granted = await AppNotificationService.requestPermission();
+
+      if (!mounted) return;
+
+      if (!granted) {
+        setState(() {
+          notificationEnabled = false;
+        });
+
+        await prefs.setBool(notificationSettingKey, false);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bạn chưa cấp quyền thông báo cho ứng dụng'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      setState(() {
+        notificationEnabled = true;
+      });
+
+      await prefs.setBool(notificationSettingKey, true);
+
+      await AppNotificationService.showNotificationEnabledTest();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Đã bật thông báo đẩy'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      setState(() {
+        notificationEnabled = false;
+      });
+
+      await prefs.setBool(notificationSettingKey, false);
+      await AppNotificationService.cancelAll();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Đã tắt thông báo đẩy'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   int get completedTasks {
@@ -203,11 +279,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                         subtitle:
                         'Nhận thông báo khi được giao việc hoặc có bình luận mới',
                         value: notificationEnabled,
-                        onChanged: (value) {
-                          setState(() {
-                            notificationEnabled = value;
-                          });
-                        },
+                        onChanged: updateNotificationSetting,
                       ),
                       const Divider(height: 1),
                       _SwitchSettingTile(
