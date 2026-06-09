@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/mock_tasks.dart';
 import '../../data/mock_users.dart';
 import '../task/task_detail_screen.dart';
+import 'user_approval_requests_screen.dart';
 
 class MyTasksScreen extends StatefulWidget {
   final MockUser user;
@@ -121,6 +122,21 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
                       completedTasks: completedTasks,
                       pendingTasks: pendingTasks,
                       highPriorityTasks: highPriorityTasks,
+                    ),
+
+                    const SizedBox(height: 18),
+
+                    _ApprovalShortcutCard(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => UserApprovalRequestsScreen(
+                              user: widget.user,
+                            ),
+                          ),
+                        );
+                      },
                     ),
 
                     const SizedBox(height: 18),
@@ -282,13 +298,18 @@ class _Header extends StatelessWidget {
           CircleAvatar(
             radius: 22,
             backgroundColor: Colors.white.withOpacity(0.18),
-            child: Text(
+            backgroundImage: user.avatarImageBytes == null
+                ? null
+                : MemoryImage(user.avatarImageBytes!),
+            child: user.avatarImageBytes == null
+                ? Text(
               user.avatarText,
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w900,
               ),
-            ),
+            )
+                : null,
           ),
         ],
       ),
@@ -863,4 +884,80 @@ BoxDecoration _cardDecoration() {
       ),
     ],
   );
+}
+
+class _ApprovalShortcutCard extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _ApprovalShortcutCard({
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(26),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.055),
+              blurRadius: 16,
+              offset: const Offset(0, 7),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEDE9FE),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: const Icon(
+                Icons.fact_check_rounded,
+                color: Color(0xFF7C3AED),
+              ),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Yêu cầu đã gửi',
+                    style: TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: 5),
+                  Text(
+                    'Xem trạng thái các requirement bạn đã gửi duyệt',
+                    style: TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: Color(0xFF9CA3AF),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

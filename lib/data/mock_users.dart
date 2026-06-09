@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 class MockUser {
   final String id;
   final String email;
@@ -6,6 +8,7 @@ class MockUser {
   final String role;
   final String avatarText;
   final bool isActive;
+  final Uint8List? avatarImageBytes;
 
   const MockUser({
     required this.id,
@@ -15,20 +18,25 @@ class MockUser {
     required this.role,
     required this.avatarText,
     this.isActive = true,
+    this.avatarImageBytes,
   });
 
   MockUser copyWith({
+    String? fullName,
+    String? avatarText,
     String? role,
     bool? isActive,
+    Uint8List? avatarImageBytes,
   }) {
     return MockUser(
       id: id,
       email: email,
       password: password,
-      fullName: fullName,
+      fullName: fullName ?? this.fullName,
       role: role ?? this.role,
-      avatarText: avatarText,
+      avatarText: avatarText ?? this.avatarText,
       isActive: isActive ?? this.isActive,
+      avatarImageBytes: avatarImageBytes ?? this.avatarImageBytes,
     );
   }
 }

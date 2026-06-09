@@ -4,6 +4,7 @@ import '../../data/mock_tasks.dart';
 import '../../data/mock_workspaces.dart';
 import '../auth/login_screen.dart';
 import '../../utils/app_navigation.dart';
+import '../user/edit_profile_screen.dart';
 
 class ProfileSettingsScreen extends StatefulWidget {
   final MockUser user;
@@ -24,6 +25,13 @@ class ProfileSettingsScreen extends StatefulWidget {
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   bool notificationEnabled = true;
   bool darkModeEnabled = false;
+  late MockUser currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    currentUser = widget.user;
+  }
 
   int get completedTasks {
     return widget.tasks.where((task) => task.status == 'Đã xong').length;
@@ -87,12 +95,36 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     );
   }
 
+  Future<void> openEditProfileScreen() async {
+    final updatedUser = await Navigator.push<MockUser>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditProfileScreen(
+          user: currentUser,
+        ),
+      ),
+    );
+
+    if (updatedUser == null) return;
+
+    setState(() {
+      currentUser = updatedUser;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Đã cập nhật hồ sơ mock'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       bottomNavigationBar: _ProfileBottomNavBar(
-        user: widget.user,
+        user: currentUser,
         project: widget.project,
         tasks: widget.tasks,
       ),
@@ -102,15 +134,16 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           child: Column(
             children: [
               _ProfileHeader(
-                user: widget.user,
+                user: currentUser,
                 onBack: () => Navigator.pop(context),
+                onSettingsTap: openEditProfileScreen,
               ),
               const SizedBox(height: 18),
 
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: _ProfileMainCard(
-                  user: widget.user,
+                  user: currentUser,
                   projectName: widget.project.name,
                 ),
               ),
@@ -206,7 +239,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                         icon: Icons.person_outline_rounded,
                         title: 'Tài khoản cá nhân',
                         subtitle: 'Cập nhật họ tên, avatar, thông tin hồ sơ',
-                        onTap: () => showFeatureMessage('Tài khoản cá nhân'),
+                        onTap: openEditProfileScreen,
                       ),
                       const Divider(height: 1),
                       _SettingTile(
@@ -312,10 +345,12 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 class _ProfileHeader extends StatelessWidget {
   final MockUser user;
   final VoidCallback onBack;
+  final VoidCallback onSettingsTap;
 
   const _ProfileHeader({
     required this.user,
     required this.onBack,
+    required this.onSettingsTap,
   });
 
   @override
@@ -364,16 +399,20 @@ class _ProfileHeader extends StatelessWidget {
               ),
             ),
           ),
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.settings_rounded,
-              color: Colors.white,
+          InkWell(
+            onTap: onSettingsTap,
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.16),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.settings_rounded,
+                color: Colors.white,
+              ),
             ),
           ),
         ],
