@@ -21,6 +21,20 @@ class MockUserNotification {
     this.projectId,
   });
 
+  factory MockUserNotification.fromJson(Map<String, dynamic> json) {
+    return MockUserNotification(
+      id: json['id']?.toString() ?? '',
+      targetUserId: json['targetUserId']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      message: json['message']?.toString() ?? '',
+      type: json['type']?.toString() ?? 'SYSTEM',
+      createdAt: json['createdAt']?.toString() ?? '',
+      isRead: json['isRead'] == true,
+      taskId: json['taskId']?.toString(),
+      projectId: json['projectId']?.toString(),
+    );
+  }
+
   MockUserNotification copyWith({
     bool? isRead,
   }) {

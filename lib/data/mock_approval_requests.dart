@@ -1,6 +1,7 @@
 class MockApprovalRequest {
   final String id;
   final String userId;
+  final String? userName;
   final String taskId;
   final String projectId;
   final String taskTitle;
@@ -14,6 +15,7 @@ class MockApprovalRequest {
   const MockApprovalRequest({
     required this.id,
     required this.userId,
+    this.userName,
     required this.taskId,
     required this.projectId,
     required this.taskTitle,
@@ -24,6 +26,23 @@ class MockApprovalRequest {
     this.reviewerName,
     this.rejectReason,
   });
+
+  factory MockApprovalRequest.fromJson(Map<String, dynamic> json) {
+    return MockApprovalRequest(
+      id: json['id']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
+      userName: json['userName']?.toString(),
+      taskId: json['taskId']?.toString() ?? '',
+      projectId: json['projectId']?.toString() ?? '',
+      taskTitle: json['taskTitle']?.toString() ?? '',
+      requirementTitle: json['requirementTitle']?.toString() ?? '',
+      status: json['status']?.toString() ?? 'WAITING',
+      submittedAt: json['submittedAt']?.toString() ?? '',
+      reviewedAt: json['reviewedAt']?.toString(),
+      reviewerName: json['reviewerName']?.toString(),
+      rejectReason: json['rejectReason']?.toString(),
+    );
+  }
 }
 
 const List<String> approvalRequestStatuses = [

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 
+import '../../services/app_data_service.dart';
 import 'avatar_crop_screen.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -23,6 +24,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController fullNameController;
   late TextEditingController avatarTextController;
   Uint8List? avatarImageBytes;
+  bool isSaving = false;
 
   @override
   void initState() {
@@ -84,7 +86,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.dispose();
   }
 
-  void saveProfile() {
+  Future<void> saveProfile() async {
     final fullName = fullNameController.text.trim();
     final avatarText = avatarTextController.text.trim().toUpperCase();
 
@@ -104,7 +106,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       avatarImageBytes: avatarImageBytes,
     );
 
-    Navigator.pop(context, updatedUser);
+    setState(() {
+      isSaving = true;
+    });
+
+    try {
+      final savedUser = await AppDataService.updateUser(updatedUser);
+      if (!mounted) return;
+      Navigator.pop(
+        context,
+        savedUser.copyWith(avatarImageBytes: avatarImageBytes),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        isSaving = false;
+      });
+      showMessage('Không thể cập nhật hồ sơ: $error');
+    }
   }
 
   void showMessage(String message) {
@@ -227,10 +246,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     const SizedBox(height: 18),
 
                     _FormCard(
-                      title: 'Ghi chú mock',
+                      title: 'Ghi chú',
                       icon: Icons.info_outline_rounded,
                       child: const Text(
-                        'Màn này chỉ cập nhật dữ liệu local trong UI. Sau này khi gắn backend, nút Lưu sẽ gọi API cập nhật hồ sơ người dùng.',
+                        'Họ tên và ký hiệu avatar được cập nhật qua backend. Ảnh đại diện đang được giữ trong phiên app hiện tại.',
                         style: TextStyle(
                           color: Color(0xFF6B7280),
                           fontWeight: FontWeight.w600,
@@ -261,9 +280,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           width: double.infinity,
           height: 54,
           child: ElevatedButton.icon(
-            onPressed: saveProfile,
-            icon: const Icon(Icons.save_rounded),
-            label: const Text('Lưu hồ sơ'),
+            onPressed: isSaving ? null : () => saveProfile(),
+            icon: isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.save_rounded),
+            label: Text(isSaving ? 'Đang lưu...' : 'Lưu hồ sơ'),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF7C3AED),
               foregroundColor: Colors.white,

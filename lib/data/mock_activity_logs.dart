@@ -20,6 +20,20 @@ class MockActivityLog {
     required this.description,
     required this.createdAt,
   });
+
+  factory MockActivityLog.fromJson(Map<String, dynamic> json) {
+    return MockActivityLog(
+      id: json['id']?.toString() ?? '',
+      workspaceId: json['workspaceId']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
+      userName: json['userName']?.toString() ?? 'Hệ thống',
+      userAvatar: json['userAvatar']?.toString() ?? 'SY',
+      actionType: json['actionType']?.toString() ?? 'SYSTEM',
+      title: json['title']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      createdAt: json['createdAt']?.toString() ?? '',
+    );
+  }
 }
 
 const List<String> activityActionTypes = [

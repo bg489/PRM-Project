@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../data/mock_users.dart';
+import '../../services/app_data_service.dart';
+import 'admin_widgets.dart';
 
 class AdminUserManagementScreen extends StatefulWidget {
   final MockUser admin;
@@ -16,276 +18,168 @@ class AdminUserManagementScreen extends StatefulWidget {
 }
 
 class _AdminUserManagementScreenState extends State<AdminUserManagementScreen> {
-  late List<MockUser> users;
+  List<MockUser> users = List.from(mockUsers);
+  bool isLoading = true;
+  String? errorMessage;
+
+  int get activeUsers => users.where((user) => user.isActive).length;
+  int get adminUsers => users.where((user) => user.role == 'Admin').length;
+  int get memberUsers => users.where((user) => user.role == 'Member').length;
 
   @override
   void initState() {
     super.initState();
-    users = List.from(mockUsers);
+    loadUsers();
   }
 
-  void changeRole(int index, String role) {
+  Future<void> loadUsers() async {
     setState(() {
-      users[index] = users[index].copyWith(role: role);
+      isLoading = true;
+      errorMessage = null;
     });
 
-    showMessage('Đã đổi role thành $role');
+    try {
+      final loadedUsers = await AppDataService.fetchUsers();
+      if (!mounted) return;
+      setState(() {
+        users = loadedUsers;
+        isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        users = List.from(mockUsers);
+        errorMessage = 'Chưa kết nối được backend, đang hiển thị user dự phòng.';
+        isLoading = false;
+      });
+    }
   }
 
-  void toggleUserStatus(int index) {
+  Future<void> changeRole(int index, String role) async {
+    final oldUser = users[index];
+    final updatedUser = oldUser.copyWith(role: role);
+
     setState(() {
-      users[index] = users[index].copyWith(
-        isActive: !users[index].isActive,
+      users[index] = updatedUser;
+    });
+
+    try {
+      final savedUser = await AppDataService.updateUser(updatedUser);
+      if (!mounted) return;
+      setState(() {
+        users[index] = savedUser;
+      });
+      showAdminMessage(context, 'Đã đổi role thành $role');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        users[index] = oldUser;
+      });
+      showAdminMessage(context, 'Không thể cập nhật role: $error');
+    }
+  }
+
+  Future<void> toggleUserStatus(int index) async {
+    final oldUser = users[index];
+    final updatedUser = oldUser.copyWith(isActive: !oldUser.isActive);
+
+    setState(() {
+      users[index] = updatedUser;
+    });
+
+    try {
+      final savedUser = await AppDataService.updateUser(updatedUser);
+      if (!mounted) return;
+      setState(() {
+        users[index] = savedUser;
+      });
+      showAdminMessage(
+        context,
+        savedUser.isActive ? 'Đã mở khóa tài khoản' : 'Đã khóa tài khoản',
       );
-    });
-
-    showMessage(
-      users[index].isActive ? 'Đã mở khóa tài khoản' : 'Đã khóa tài khoản',
-    );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        users[index] = oldUser;
+      });
+      showAdminMessage(context, 'Không thể cập nhật trạng thái: $error');
+    }
   }
-
-  void showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  int get activeUsers => users.where((user) => user.isActive).length;
-
-  int get adminUsers => users.where((user) => user.role == 'Admin').length;
-
-  int get memberUsers => users.where((user) => user.role == 'Member').length;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _Header(
-              onBack: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
+    return AdminScreenScaffold(
+      title: 'Quản lý người dùng',
+      icon: Icons.people_alt_rounded,
+      child: RefreshIndicator(
+        onRefresh: loadUsers,
+        child: isLoading
+            ? const AdminLoading()
+            : SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                 child: Column(
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _SmallStatCard(
-                            label: 'Active',
-                            value: '$activeUsers',
-                            color: const Color(0xFF22C55E),
-                            icon: Icons.verified_user_rounded,
-                          ),
+                    if (errorMessage != null) ...[
+                      AdminErrorBanner(
+                        message: errorMessage!,
+                        onRetry: loadUsers,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    AdminStatGrid(
+                      stats: [
+                        AdminStat(
+                          label: 'Active',
+                          value: '$activeUsers',
+                          icon: Icons.verified_user_rounded,
+                          color: const Color(0xFF22C55E),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _SmallStatCard(
-                            label: 'Admin',
-                            value: '$adminUsers',
-                            color: const Color(0xFF7C3AED),
-                            icon: Icons.admin_panel_settings_rounded,
-                          ),
+                        AdminStat(
+                          label: 'Admin',
+                          value: '$adminUsers',
+                          icon: Icons.admin_panel_settings_rounded,
+                          color: const Color(0xFF7C3AED),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _SmallStatCard(
-                            label: 'Member',
-                            value: '$memberUsers',
-                            color: const Color(0xFF2563EB),
-                            icon: Icons.person_rounded,
-                          ),
+                        AdminStat(
+                          label: 'Member',
+                          value: '$memberUsers',
+                          icon: Icons.person_rounded,
+                          color: const Color(0xFF2563EB),
                         ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Danh sách người dùng',
-                            style: TextStyle(
-                              color: Color(0xFF111827),
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEDE9FE),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            '${users.length} user',
-                            style: const TextStyle(
-                              color: Color(0xFF6D28D9),
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12,
-                            ),
-                          ),
+                        AdminStat(
+                          label: 'Tổng',
+                          value: '${users.length}',
+                          icon: Icons.groups_rounded,
+                          color: const Color(0xFFF59E0B),
                         ),
                       ],
                     ),
-
+                    const SizedBox(height: 18),
+                    AdminSectionTitle(
+                      title: 'Danh sách người dùng',
+                      countLabel: '${users.length} user',
+                    ),
                     const SizedBox(height: 14),
-
-                    ...List.generate(users.length, (index) {
-                      return _UserAdminCard(
-                        user: users[index],
-                        onRoleChanged: (role) => changeRole(index, role),
-                        onToggleStatus: () => toggleUserStatus(index),
-                      );
-                    }),
+                    if (users.isEmpty)
+                      const AdminEmptyState(
+                        icon: Icons.person_off_outlined,
+                        message: 'Chưa có người dùng nào.',
+                      )
+                    else
+                      ...List.generate(users.length, (index) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _UserAdminCard(
+                            user: users[index],
+                            onRoleChanged: (role) => changeRole(index, role),
+                            onToggleStatus: () => toggleUserStatus(index),
+                          ),
+                        );
+                      }),
                   ],
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  final VoidCallback onBack;
-
-  const _Header({
-    required this.onBack,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFF111827),
-            Color(0xFF7C3AED),
-          ],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
-        ),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: onBack,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: Colors.white,
-                size: 19,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Text(
-              'Quản lý người dùng',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 21,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.people_alt_rounded,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SmallStatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final IconData icon;
-
-  const _SmallStatCard({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 14,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.055),
-            blurRadius: 16,
-            offset: const Offset(0, 7),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Icon(
-            icon,
-            color: color,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Color(0xFF111827),
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFF6B7280),
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -304,28 +198,9 @@ class _UserAdminCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final roleColor = _getRoleColor(user.role);
+    final roleColor = _roleColor(user.role);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(
-          color: user.isActive
-              ? Colors.transparent
-              : const Color(0xFFEF4444),
-          width: 1.3,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.055),
-            blurRadius: 16,
-            offset: const Offset(0, 7),
-          ),
-        ],
-      ),
+    return AdminCard(
       child: Column(
         children: [
           Row(
@@ -367,64 +242,30 @@ class _UserAdminCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: user.isActive
-                      ? const Color(0xFFDCFCE7)
-                      : const Color(0xFFFEE2E2),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  user.isActive ? 'Active' : 'Locked',
-                  style: TextStyle(
-                    color: user.isActive
-                        ? const Color(0xFF16A34A)
-                        : const Color(0xFFDC2626),
-                    fontWeight: FontWeight.w900,
-                    fontSize: 11,
-                  ),
-                ),
+              AdminPill(
+                label: user.isActive ? 'Active' : 'Locked',
+                color: user.isActive
+                    ? const Color(0xFF16A34A)
+                    : const Color(0xFFDC2626),
               ),
             ],
           ),
-
           const SizedBox(height: 14),
-
           Row(
             children: [
               Expanded(
                 child: DropdownButtonFormField<String>(
                   value: user.role,
-                  decoration: InputDecoration(
-                    labelText: 'Role',
-                    filled: true,
-                    fillColor: const Color(0xFFF3F4F6),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
+                  decoration: adminInputDecoration(label: 'Role'),
                   items: const [
-                    DropdownMenuItem(
-                      value: 'Admin',
-                      child: Text('Admin'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'Manager',
-                      child: Text('Manager'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'Member',
-                      child: Text('Member'),
-                    ),
+                    DropdownMenuItem(value: 'Admin', child: Text('Admin')),
+                    DropdownMenuItem(value: 'Manager', child: Text('Manager')),
+                    DropdownMenuItem(value: 'Member', child: Text('Member')),
                   ],
                   onChanged: (value) {
-                    if (value == null) return;
-                    onRoleChanged(value);
+                    if (value != null && value != user.role) {
+                      onRoleChanged(value);
+                    }
                   },
                 ),
               ),
@@ -456,7 +297,7 @@ class _UserAdminCard extends StatelessWidget {
     );
   }
 
-  Color _getRoleColor(String role) {
+  Color _roleColor(String role) {
     switch (role) {
       case 'Admin':
         return const Color(0xFF7C3AED);

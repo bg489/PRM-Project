@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../data/mock_tasks.dart';
 import '../../data/mock_workspaces.dart';
+import '../../services/app_data_service.dart';
+import 'admin_widgets.dart';
 
 class AdminTaskManagementScreen extends StatefulWidget {
   const AdminTaskManagementScreen({super.key});
@@ -14,38 +16,68 @@ class AdminTaskManagementScreen extends StatefulWidget {
 class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
   List<MockTask> tasks = List.from(mockTasks);
   List<MockProject> projects = List.from(mockProjects);
-
   String selectedProjectFilter = 'all';
   String selectedStatusFilter = 'all';
   String selectedPriorityFilter = 'all';
+  bool isLoading = true;
+  String? errorMessage;
 
   List<MockTask> get filteredTasks {
     return tasks.where((task) {
       final matchProject =
           selectedProjectFilter == 'all' || task.projectId == selectedProjectFilter;
-
       final matchStatus =
           selectedStatusFilter == 'all' || task.status == selectedStatusFilter;
-
       final matchPriority =
           selectedPriorityFilter == 'all' || task.priority == selectedPriorityFilter;
-
       return matchProject && matchStatus && matchPriority;
     }).toList();
   }
 
   int get doneTasks {
-    return tasks.where((task) => task.status == 'Đã xong').length;
+    return tasks.where((task) => task.status == kanbanColumns.last).length;
   }
 
   int get inProgressTasks {
     return tasks.where((task) {
-      return task.status == 'Đang làm' || task.status == 'Kiểm tra';
+      return task.status == kanbanColumns[1] || task.status == kanbanColumns[2];
     }).length;
   }
 
   int get highPriorityTasks {
     return tasks.where((task) => task.priority == 'High').length;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    loadData();
+  }
+
+  Future<void> loadData() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
+
+    try {
+      final loadedProjects = await AppDataService.fetchProjects();
+      final loadedTasks = await AppDataService.fetchTasks();
+      if (!mounted) return;
+      setState(() {
+        projects = loadedProjects;
+        tasks = loadedTasks;
+        isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        projects = List.from(mockProjects);
+        tasks = List.from(mockTasks);
+        errorMessage = 'Chưa kết nối được backend, đang hiển thị task dự phòng.';
+        isLoading = false;
+      });
+    }
   }
 
   String getProjectName(String projectId) {
@@ -56,44 +88,48 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
     }
   }
 
-  void updateTaskStatus(MockTask task, String newStatus) {
-    final realIndex = tasks.indexWhere((item) => item.id == task.id);
-
-    if (realIndex == -1) return;
+  Future<void> updateTaskStatus(MockTask task, String newStatus) async {
+    final index = tasks.indexWhere((item) => item.id == task.id);
+    if (index == -1) return;
 
     setState(() {
-      tasks[realIndex] = tasks[realIndex].copyWith(status: newStatus);
+      tasks[index] = tasks[index].copyWith(status: newStatus);
     });
 
-    showMessage('Đã đổi trạng thái task sang "$newStatus"');
+    try {
+      final savedTask = await AppDataService.updateTaskStatus(
+        taskId: task.id,
+        status: newStatus,
+      );
+      if (!mounted) return;
+      setState(() {
+        tasks[index] = savedTask;
+      });
+      showAdminMessage(context, 'Đã đổi trạng thái task sang "$newStatus"');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        tasks[index] = task;
+      });
+      showAdminMessage(context, 'Không thể cập nhật task: $error');
+    }
   }
 
-  void deleteTask(MockTask task) {
-    showDialog(
+  Future<void> deleteTask(MockTask task) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
           title: const Text('Xóa Task'),
-          content: Text(
-            'Bạn có chắc muốn xóa task "${task.title}" không?',
-          ),
+          content: Text('Bạn có chắc muốn xóa task "${task.title}" không?'),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
+              onPressed: () => Navigator.pop(dialogContext, false),
               child: const Text('Hủy'),
             ),
             ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  tasks.removeWhere((item) => item.id == task.id);
-                });
-
-                Navigator.pop(dialogContext);
-                showMessage('Đã xóa task mock');
-              },
+              onPressed: () => Navigator.pop(dialogContext, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFEF4444),
                 foregroundColor: Colors.white,
@@ -104,6 +140,20 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
         );
       },
     );
+
+    if (confirmed != true) return;
+
+    try {
+      await AppDataService.deleteTask(task.id);
+      if (!mounted) return;
+      setState(() {
+        tasks.removeWhere((item) => item.id == task.id);
+      });
+      showAdminMessage(context, 'Đã xóa task');
+    } catch (error) {
+      if (!mounted) return;
+      showAdminMessage(context, 'Không thể xóa task: $error');
+    }
   }
 
   void showTaskDetail(MockTask task) {
@@ -113,192 +163,117 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
       backgroundColor: Colors.transparent,
       builder: (bottomSheetContext) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.78,
+          initialChildSize: 0.72,
           minChildSize: 0.45,
-          maxChildSize: 0.92,
+          maxChildSize: 0.9,
           builder: (context, scrollController) {
             return Container(
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(28),
-                  topRight: Radius.circular(28),
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
                 ),
               ),
-              child: SingleChildScrollView(
+              child: ListView(
                 controller: scrollController,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 42,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE5E7EB),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    Center(
-                      child: Container(
-                        width: 68,
-                        height: 68,
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [
-                              Color(0xFF2563EB),
-                              Color(0xFF9333EA),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: const Icon(
-                          Icons.task_alt_rounded,
-                          color: Colors.white,
-                          size: 34,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    Center(
-                      child: Text(
-                        task.title,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Color(0xFF111827),
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          height: 1.25,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    Center(
-                      child: Text(
-                        getProjectName(task.projectId),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Color(0xFF6B7280),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _DetailStatBox(
-                            label: 'Trạng thái',
-                            value: task.status,
-                            icon: Icons.view_kanban_outlined,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _DetailStatBox(
-                            label: 'Priority',
-                            value: _priorityLabel(task.priority),
-                            icon: Icons.flag_outlined,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _DetailStatBox(
-                            label: 'Checklist',
-                            value: '${task.checklistDone}/${task.checklistTotal}',
-                            icon: Icons.checklist_rounded,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _DetailStatBox(
-                            label: 'Bình luận',
-                            value: '${task.commentCount}',
-                            icon: Icons.chat_bubble_outline_rounded,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    _InfoBlock(
-                      icon: Icons.description_outlined,
-                      title: 'Mô tả',
-                      content: task.description,
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _InfoBlock(
-                      icon: Icons.person_outline_rounded,
-                      title: 'Người phụ trách',
-                      content: '${task.assigneeName} (${task.assigneeAvatar})',
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _InfoBlock(
-                      icon: Icons.calendar_today_outlined,
-                      title: 'Deadline',
-                      content: task.dueDate,
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    const Text(
-                      'Đổi trạng thái nhanh',
-                      style: TextStyle(
-                        color: Color(0xFF111827),
+                children: [
+                  CircleAvatar(
+                    radius: 34,
+                    backgroundColor: const Color(0xFF7C3AED),
+                    child: Text(
+                      task.assigneeAvatar,
+                      style: const TextStyle(
+                        color: Colors.white,
                         fontWeight: FontWeight.w900,
-                        fontSize: 17,
                       ),
                     ),
-
-                    const SizedBox(height: 10),
-
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: kanbanColumns.map((status) {
-                        final isSelected = task.status == status;
-
-                        return ChoiceChip(
-                          selected: isSelected,
-                          label: Text(status),
-                          selectedColor: const Color(0xFFEDE9FE),
-                          labelStyle: TextStyle(
-                            color: isSelected
-                                ? const Color(0xFF6D28D9)
-                                : const Color(0xFF374151),
-                            fontWeight: FontWeight.w800,
-                          ),
-                          onSelected: (_) {
-                            Navigator.pop(bottomSheetContext);
-                            updateTaskStatus(task, status);
-                          },
-                        );
-                      }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    task.title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    getProjectName(task.projectId),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  AdminStatGrid(
+                    stats: [
+                      AdminStat(
+                        label: 'Trạng thái',
+                        value: task.status,
+                        icon: Icons.view_kanban_outlined,
+                        color: const Color(0xFF7C3AED),
+                      ),
+                      AdminStat(
+                        label: 'Priority',
+                        value: _priorityLabel(task.priority),
+                        icon: Icons.flag_outlined,
+                        color: _priorityColor(task.priority),
+                      ),
+                      AdminStat(
+                        label: 'Checklist',
+                        value: '${task.checklistDone}/${task.checklistTotal}',
+                        icon: Icons.checklist_rounded,
+                        color: const Color(0xFF2563EB),
+                      ),
+                      AdminStat(
+                        label: 'Bình luận',
+                        value: '${task.commentCount}',
+                        icon: Icons.chat_bubble_outline_rounded,
+                        color: const Color(0xFFF59E0B),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  AdminCard(
+                    child: Text(
+                      task.description,
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Đổi trạng thái nhanh',
+                    style: TextStyle(
+                      color: Color(0xFF111827),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 17,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: kanbanColumns.map((status) {
+                      return ChoiceChip(
+                        selected: task.status == status,
+                        label: Text(status),
+                        onSelected: (_) {
+                          Navigator.pop(bottomSheetContext);
+                          updateTaskStatus(task, status);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ],
               ),
             );
           },
@@ -318,42 +293,70 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
     }
   }
 
-  void showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+  Color _priorityColor(String priority) {
+    switch (priority) {
+      case 'High':
+        return const Color(0xFFEF4444);
+      case 'Medium':
+        return const Color(0xFFF59E0B);
+      default:
+        return const Color(0xFF22C55E);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final visibleTasks = filteredTasks;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _Header(
-              onBack: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
+    return AdminScreenScaffold(
+      title: 'Quản lý Task',
+      icon: Icons.task_alt_rounded,
+      child: RefreshIndicator(
+        onRefresh: loadData,
+        child: isLoading
+            ? const AdminLoading()
+            : SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _OverviewPanel(
-                      totalTasks: tasks.length,
-                      doneTasks: doneTasks,
-                      inProgressTasks: inProgressTasks,
-                      highPriorityTasks: highPriorityTasks,
+                    if (errorMessage != null) ...[
+                      AdminErrorBanner(
+                        message: errorMessage!,
+                        onRetry: loadData,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    AdminStatGrid(
+                      stats: [
+                        AdminStat(
+                          label: 'Tổng',
+                          value: '${tasks.length}',
+                          icon: Icons.fact_check_rounded,
+                          color: const Color(0xFF7C3AED),
+                        ),
+                        AdminStat(
+                          label: 'Đã xong',
+                          value: '$doneTasks',
+                          icon: Icons.check_circle_rounded,
+                          color: const Color(0xFF22C55E),
+                        ),
+                        AdminStat(
+                          label: 'Đang làm',
+                          value: '$inProgressTasks',
+                          icon: Icons.pending_actions_rounded,
+                          color: const Color(0xFFF59E0B),
+                        ),
+                        AdminStat(
+                          label: 'Ưu tiên cao',
+                          value: '$highPriorityTasks',
+                          icon: Icons.flag_rounded,
+                          color: const Color(0xFFEF4444),
+                        ),
+                      ],
                     ),
-
-                    const SizedBox(height: 20),
-
+                    const SizedBox(height: 18),
                     _FilterPanel(
                       projects: projects,
                       selectedProjectFilter: selectedProjectFilter,
@@ -375,286 +378,37 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
                         });
                       },
                     ),
-
-                    const SizedBox(height: 20),
-
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Tất cả Task',
-                            style: TextStyle(
-                              color: Color(0xFF111827),
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEDE9FE),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            '${visibleTasks.length} task',
-                            style: const TextStyle(
-                              color: Color(0xFF6D28D9),
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 18),
+                    AdminSectionTitle(
+                      title: 'Tất cả Task',
+                      countLabel: '${visibleTasks.length} task',
                     ),
-
-                    const SizedBox(height: 8),
-
-                    const Text(
-                      'Admin có thể xem, lọc, đổi trạng thái hoặc xóa task mock.',
-                      style: TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
+                    const SizedBox(height: 14),
                     if (visibleTasks.isEmpty)
-                      const _EmptyTaskList()
+                      const AdminEmptyState(
+                        icon: Icons.task_alt_outlined,
+                        message: 'Không có task nào phù hợp bộ lọc.',
+                      )
                     else
                       ...visibleTasks.map((task) {
-                        return _TaskAdminCard(
-                          task: task,
-                          projectName: getProjectName(task.projectId),
-                          onView: () => showTaskDetail(task),
-                          onStatusChanged: (status) {
-                            updateTaskStatus(task, status);
-                          },
-                          onDelete: () => deleteTask(task),
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _TaskAdminCard(
+                            task: task,
+                            projectName: getProjectName(task.projectId),
+                            priorityLabel: _priorityLabel(task.priority),
+                            priorityColor: _priorityColor(task.priority),
+                            onView: () => showTaskDetail(task),
+                            onStatusChanged: (status) {
+                              updateTaskStatus(task, status);
+                            },
+                            onDelete: () => deleteTask(task),
+                          ),
                         );
                       }),
                   ],
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  final VoidCallback onBack;
-
-  const _Header({
-    required this.onBack,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFF111827),
-            Color(0xFF7C3AED),
-          ],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
-        ),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: onBack,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: Colors.white,
-                size: 19,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Text(
-              'Quản lý Task',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 21,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.task_alt_rounded,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewPanel extends StatelessWidget {
-  final int totalTasks;
-  final int doneTasks;
-  final int inProgressTasks;
-  final int highPriorityTasks;
-
-  const _OverviewPanel({
-    required this.totalTasks,
-    required this.doneTasks,
-    required this.inProgressTasks,
-    required this.highPriorityTasks,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF111827),
-            Color(0xFF7C3AED),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF7C3AED).withOpacity(0.22),
-            blurRadius: 18,
-            offset: const Offset(0, 9),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.fact_check_rounded,
-                color: Colors.white,
-                size: 30,
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Tổng quan Task',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          Row(
-            children: [
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Tổng',
-                  value: '$totalTasks',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Đã xong',
-                  value: '$doneTasks',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Đang làm',
-                  value: '$inProgressTasks',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Ưu tiên cao',
-                  value: '$highPriorityTasks',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewMiniStat extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _OverviewMiniStat({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 13,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -681,43 +435,17 @@ class _FilterPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
+    return AdminCard(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.filter_alt_outlined,
-                color: Color(0xFF7C3AED),
-              ),
-              SizedBox(width: 8),
-              Text(
-                'Bộ lọc Task',
-                style: TextStyle(
-                  color: Color(0xFF111827),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 14),
-
           DropdownButtonFormField<String>(
             value: selectedProjectFilter,
-            decoration: _inputDecoration(
-              hintText: 'Lọc theo project',
+            decoration: adminInputDecoration(
+              label: 'Lọc theo project',
               icon: Icons.folder_open_outlined,
             ),
             items: [
-              const DropdownMenuItem(
-                value: 'all',
-                child: Text('Tất cả Project'),
-              ),
+              const DropdownMenuItem(value: 'all', child: Text('Tất cả Project')),
               ...projects.map((project) {
                 return DropdownMenuItem(
                   value: project.id,
@@ -726,85 +454,44 @@ class _FilterPanel extends StatelessWidget {
               }),
             ],
             onChanged: (value) {
-              if (value == null) return;
-              onProjectChanged(value);
+              if (value != null) onProjectChanged(value);
             },
           ),
-
           const SizedBox(height: 12),
-
           DropdownButtonFormField<String>(
             value: selectedStatusFilter,
-            decoration: _inputDecoration(
-              hintText: 'Lọc theo trạng thái',
+            decoration: adminInputDecoration(
+              label: 'Lọc theo trạng thái',
               icon: Icons.view_kanban_outlined,
             ),
             items: [
-              const DropdownMenuItem(
-                value: 'all',
-                child: Text('Tất cả trạng thái'),
-              ),
+              const DropdownMenuItem(value: 'all', child: Text('Tất cả trạng thái')),
               ...kanbanColumns.map((status) {
-                return DropdownMenuItem(
-                  value: status,
-                  child: Text(status),
-                );
+                return DropdownMenuItem(value: status, child: Text(status));
               }),
             ],
             onChanged: (value) {
-              if (value == null) return;
-              onStatusChanged(value);
+              if (value != null) onStatusChanged(value);
             },
           ),
-
           const SizedBox(height: 12),
-
           DropdownButtonFormField<String>(
             value: selectedPriorityFilter,
-            decoration: _inputDecoration(
-              hintText: 'Lọc theo priority',
+            decoration: adminInputDecoration(
+              label: 'Lọc theo priority',
               icon: Icons.flag_outlined,
             ),
             items: const [
-              DropdownMenuItem(
-                value: 'all',
-                child: Text('Tất cả priority'),
-              ),
-              DropdownMenuItem(
-                value: 'High',
-                child: Text('Cao'),
-              ),
-              DropdownMenuItem(
-                value: 'Medium',
-                child: Text('Trung bình'),
-              ),
-              DropdownMenuItem(
-                value: 'Low',
-                child: Text('Thấp'),
-              ),
+              DropdownMenuItem(value: 'all', child: Text('Tất cả priority')),
+              DropdownMenuItem(value: 'High', child: Text('Cao')),
+              DropdownMenuItem(value: 'Medium', child: Text('Trung bình')),
+              DropdownMenuItem(value: 'Low', child: Text('Thấp')),
             ],
             onChanged: (value) {
-              if (value == null) return;
-              onPriorityChanged(value);
+              if (value != null) onPriorityChanged(value);
             },
           ),
         ],
-      ),
-    );
-  }
-
-  InputDecoration _inputDecoration({
-    required String hintText,
-    required IconData icon,
-  }) {
-    return InputDecoration(
-      hintText: hintText,
-      prefixIcon: Icon(icon),
-      filled: true,
-      fillColor: const Color(0xFFF3F4F6),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide.none,
       ),
     );
   }
@@ -813,6 +500,8 @@ class _FilterPanel extends StatelessWidget {
 class _TaskAdminCard extends StatelessWidget {
   final MockTask task;
   final String projectName;
+  final String priorityLabel;
+  final Color priorityColor;
   final VoidCallback onView;
   final ValueChanged<String> onStatusChanged;
   final VoidCallback onDelete;
@@ -820,6 +509,8 @@ class _TaskAdminCard extends StatelessWidget {
   const _TaskAdminCard({
     required this.task,
     required this.projectName,
+    required this.priorityLabel,
+    required this.priorityColor,
     required this.onView,
     required this.onStatusChanged,
     required this.onDelete,
@@ -827,14 +518,12 @@ class _TaskAdminCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final priorityConfig = _priorityConfig(task.priority);
     final checklistProgress =
-    task.checklistTotal == 0 ? 0.0 : task.checklistDone / task.checklistTotal;
+        task.checklistTotal == 0 ? 0.0 : task.checklistDone / task.checklistTotal;
+    final statusValue =
+        kanbanColumns.contains(task.status) ? task.status : kanbanColumns.first;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: _cardDecoration(),
+    return AdminCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -878,31 +567,24 @@ class _TaskAdminCard extends StatelessWidget {
                   ],
                 ),
               ),
-              _PriorityBadge(
-                label: priorityConfig.label,
-                color: priorityConfig.color,
-              ),
+              AdminPill(label: priorityLabel, color: priorityColor),
             ],
           ),
-
           const SizedBox(height: 14),
-
           Row(
             children: [
-              _SmallInfoChip(
-                icon: Icons.person_outline_rounded,
+              AdminPill(
                 label: task.assigneeName,
+                color: const Color(0xFF2563EB),
               ),
               const SizedBox(width: 8),
-              _SmallInfoChip(
-                icon: Icons.calendar_today_outlined,
+              AdminPill(
                 label: task.dueDate,
+                color: const Color(0xFFF59E0B),
               ),
             ],
           ),
-
           const SizedBox(height: 12),
-
           Row(
             children: [
               Text(
@@ -918,7 +600,7 @@ class _TaskAdminCard extends StatelessWidget {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(999),
                   child: LinearProgressIndicator(
-                    value: checklistProgress,
+                    value: checklistProgress.clamp(0.0, 1.0).toDouble(),
                     minHeight: 7,
                     backgroundColor: const Color(0xFFE5E7EB),
                     valueColor: const AlwaysStoppedAnimation<Color>(
@@ -929,34 +611,18 @@ class _TaskAdminCard extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 14),
-
           DropdownButtonFormField<String>(
-            value: task.status,
-            decoration: InputDecoration(
-              labelText: 'Trạng thái',
-              filled: true,
-              fillColor: const Color(0xFFF3F4F6),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
-            ),
+            value: statusValue,
+            decoration: adminInputDecoration(label: 'Trạng thái'),
             items: kanbanColumns.map((status) {
-              return DropdownMenuItem(
-                value: status,
-                child: Text(status),
-              );
+              return DropdownMenuItem(value: status, child: Text(status));
             }).toList(),
             onChanged: (value) {
-              if (value == null) return;
-              onStatusChanged(value);
+              if (value != null && value != task.status) onStatusChanged(value);
             },
           ),
-
           const SizedBox(height: 12),
-
           Row(
             children: [
               Expanded(
@@ -964,7 +630,6 @@ class _TaskAdminCard extends StatelessWidget {
                   onPressed: onView,
                   icon: const Icon(Icons.remove_red_eye_outlined, size: 18),
                   label: const Text('Xem'),
-                  style: _buttonStyle(const Color(0xFF2563EB)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -973,7 +638,9 @@ class _TaskAdminCard extends StatelessWidget {
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline_rounded, size: 18),
                   label: const Text('Xóa'),
-                  style: _buttonStyle(const Color(0xFFEF4444)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFEF4444),
+                  ),
                 ),
               ),
             ],
@@ -982,263 +649,4 @@ class _TaskAdminCard extends StatelessWidget {
       ),
     );
   }
-
-  _PriorityConfig _priorityConfig(String priority) {
-    switch (priority) {
-      case 'High':
-        return _PriorityConfig('Cao', const Color(0xFFEF4444));
-      case 'Medium':
-        return _PriorityConfig('Trung bình', const Color(0xFFF59E0B));
-      default:
-        return _PriorityConfig('Thấp', const Color(0xFF22C55E));
-    }
-  }
-
-  ButtonStyle _buttonStyle(Color color) {
-    return OutlinedButton.styleFrom(
-      foregroundColor: color,
-      side: BorderSide(color: color.withOpacity(0.35)),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-    );
-  }
-}
-
-class _PriorityBadge extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _PriorityBadge({
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
-      ),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w900,
-          fontSize: 11,
-        ),
-      ),
-    );
-  }
-}
-
-class _SmallInfoChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-
-  const _SmallInfoChip({
-    required this.icon,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 8,
-        ),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF3F4F6),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 15,
-              color: const Color(0xFF6B7280),
-            ),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF6B7280),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DetailStatBox extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-
-  const _DetailStatBox({
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            icon,
-            color: const Color(0xFF7C3AED),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Color(0xFF111827),
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoBlock extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String content;
-
-  const _InfoBlock({
-    required this.icon,
-    required this.title,
-    required this.content,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            icon,
-            color: const Color(0xFF7C3AED),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Color(0xFF111827),
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  content,
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyTaskList extends StatelessWidget {
-  const _EmptyTaskList();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: _cardDecoration(),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.task_alt_outlined,
-            size: 46,
-            color: Color(0xFF9CA3AF),
-          ),
-          SizedBox(height: 10),
-          Text(
-            'Không có task nào phù hợp bộ lọc',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PriorityConfig {
-  final String label;
-  final Color color;
-
-  _PriorityConfig(this.label, this.color);
-}
-
-BoxDecoration _cardDecoration() {
-  return BoxDecoration(
-    color: Colors.white,
-    borderRadius: BorderRadius.circular(26),
-    boxShadow: [
-      BoxShadow(
-        color: Colors.black.withOpacity(0.055),
-        blurRadius: 16,
-        offset: const Offset(0, 7),
-      ),
-    ],
-  );
 }

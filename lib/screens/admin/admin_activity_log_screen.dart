@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../data/mock_activity_logs.dart';
 import '../../data/mock_users.dart';
 import '../../data/mock_workspaces.dart';
+import '../../services/app_data_service.dart';
+import 'admin_widgets.dart';
 
 class AdminActivityLogScreen extends StatefulWidget {
   const AdminActivityLogScreen({super.key});
@@ -13,47 +15,88 @@ class AdminActivityLogScreen extends StatefulWidget {
 
 class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
   List<MockActivityLog> logs = List.from(mockActivityLogs);
-
+  List<MockUser> users = List.from(mockUsers);
+  List<MockWorkspace> workspaces = List.from(mockWorkspaces);
   String selectedActionType = 'all';
   String selectedUserId = 'all';
   String selectedWorkspaceId = 'all';
+  bool isLoading = true;
+  String? errorMessage;
 
   List<MockActivityLog> get filteredLogs {
     return logs.where((log) {
       final matchAction =
           selectedActionType == 'all' || log.actionType == selectedActionType;
-
       final matchUser = selectedUserId == 'all' || log.userId == selectedUserId;
-
-      final matchWorkspace =
-          selectedWorkspaceId == 'all' || log.workspaceId == selectedWorkspaceId;
-
+      final matchWorkspace = selectedWorkspaceId == 'all' ||
+          log.workspaceId == selectedWorkspaceId;
       return matchAction && matchUser && matchWorkspace;
     }).toList();
   }
 
   int get todayLogs {
-    return logs.where((log) => log.createdAt.contains('Hôm nay')).length;
+    final now = DateTime.now();
+    final todayPrefix =
+        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
+    return logs.where((log) => log.createdAt.startsWith(todayPrefix)).length;
   }
 
-  int get taskLogs {
-    return logs.where((log) => log.actionType.startsWith('TASK')).length;
+  int get taskLogs => logs.where((log) => log.actionType.startsWith('TASK')).length;
+  int get approvalLogs =>
+      logs.where((log) => log.actionType.startsWith('APPROVAL')).length;
+  int get userLogs =>
+      logs.where((log) => log.actionType.contains('USER')).length;
+
+  @override
+  void initState() {
+    super.initState();
+    loadData();
   }
 
-  int get approvalLogs {
-    return logs.where((log) => log.actionType.startsWith('APPROVAL')).length;
-  }
+  Future<void> loadData() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
 
-  int get userLogs {
-    return logs.where((log) => log.actionType.contains('USER')).length;
+    try {
+      final loadedLogs = await AppDataService.fetchActivityLogs();
+      final loadedUsers = await AppDataService.fetchUsers();
+      final loadedWorkspaces = await AppDataService.fetchWorkspaces();
+      if (!mounted) return;
+      setState(() {
+        logs = loadedLogs;
+        users = loadedUsers;
+        workspaces = loadedWorkspaces;
+        isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        logs = List.from(mockActivityLogs);
+        users = List.from(mockUsers);
+        workspaces = List.from(mockWorkspaces);
+        errorMessage = 'Chưa kết nối được backend, đang hiển thị log dự phòng.';
+        isLoading = false;
+      });
+    }
   }
 
   String getWorkspaceName(String workspaceId) {
+    if (workspaceId.isEmpty) return 'Toàn hệ thống';
     try {
-      return mockWorkspaces.firstWhere((item) => item.id == workspaceId).name;
+      return workspaces.firstWhere((item) => item.id == workspaceId).name;
     } catch (_) {
       return 'Không rõ workspace';
     }
+  }
+
+  void clearFilters() {
+    setState(() {
+      selectedActionType = 'all';
+      selectedUserId = 'all';
+      selectedWorkspaceId = 'all';
+    });
   }
 
   void showLogDetail(MockActivityLog log) {
@@ -74,123 +117,72 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(28),
-                  topRight: Radius.circular(28),
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
                 ),
               ),
-              child: SingleChildScrollView(
+              child: ListView(
                 controller: scrollController,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 42,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE5E7EB),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
+                children: [
+                  CircleAvatar(
+                    radius: 34,
+                    backgroundColor: actionConfig.color.withOpacity(0.16),
+                    child: Icon(
+                      actionConfig.icon,
+                      color: actionConfig.color,
+                      size: 34,
                     ),
-
-                    const SizedBox(height: 18),
-
-                    Center(
-                      child: Container(
-                        width: 68,
-                        height: 68,
-                        decoration: BoxDecoration(
-                          color: actionConfig.color.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: Icon(
-                          actionConfig.icon,
-                          color: actionConfig.color,
-                          size: 34,
-                        ),
-                      ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    log.title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
                     ),
-
-                    const SizedBox(height: 16),
-
-                    Center(
-                      child: Text(
-                        log.title,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Color(0xFF111827),
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          height: 1.25,
-                        ),
-                      ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: AdminPill(
+                      label: actionConfig.label,
+                      color: actionConfig.color,
                     ),
-
-                    const SizedBox(height: 8),
-
-                    Center(
-                      child: _ActionBadge(
-                        label: actionConfig.label,
-                        color: actionConfig.color,
-                      ),
-                    ),
-
-                    const SizedBox(height: 22),
-
-                    _DetailBlock(
-                      icon: Icons.description_outlined,
-                      title: 'Mô tả hoạt động',
-                      content: log.description,
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _DetailBlock(
-                      icon: Icons.person_outline_rounded,
-                      title: 'Người thực hiện',
-                      content: '${log.userName} (${log.userAvatar})',
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _DetailBlock(
-                      icon: Icons.workspaces_outline,
-                      title: 'Workspace',
-                      content: getWorkspaceName(log.workspaceId),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _DetailBlock(
-                      icon: Icons.access_time_rounded,
-                      title: 'Thời gian',
-                      content: log.createdAt,
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _DetailBlock(
-                      icon: Icons.code_rounded,
-                      title: 'Action Type',
-                      content: log.actionType,
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 18),
+                  _DetailBlock(
+                    icon: Icons.description_outlined,
+                    title: 'Mô tả hoạt động',
+                    content: log.description,
+                  ),
+                  _DetailBlock(
+                    icon: Icons.person_outline_rounded,
+                    title: 'Người thực hiện',
+                    content: '${log.userName} (${log.userAvatar})',
+                  ),
+                  _DetailBlock(
+                    icon: Icons.workspaces_outline,
+                    title: 'Workspace',
+                    content: getWorkspaceName(log.workspaceId),
+                  ),
+                  _DetailBlock(
+                    icon: Icons.access_time_rounded,
+                    title: 'Thời gian',
+                    content: log.createdAt,
+                  ),
+                  _DetailBlock(
+                    icon: Icons.code_rounded,
+                    title: 'Action Type',
+                    content: log.actionType,
+                  ),
+                ],
               ),
             );
           },
         );
       },
     );
-  }
-
-  void clearFilters() {
-    setState(() {
-      selectedActionType = 'all';
-      selectedUserId = 'all';
-      selectedWorkspaceId = 'all';
-    });
   }
 
   _ActionConfig _getActionConfig(String actionType) {
@@ -268,30 +260,58 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
   Widget build(BuildContext context) {
     final visibleLogs = filteredLogs;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _Header(
-              onBack: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
+    return AdminScreenScaffold(
+      title: 'Activity Log',
+      icon: Icons.history_rounded,
+      child: RefreshIndicator(
+        onRefresh: loadData,
+        child: isLoading
+            ? const AdminLoading()
+            : SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _OverviewPanel(
-                      totalLogs: logs.length,
-                      todayLogs: todayLogs,
-                      taskLogs: taskLogs,
-                      approvalLogs: approvalLogs,
+                    if (errorMessage != null) ...[
+                      AdminErrorBanner(
+                        message: errorMessage!,
+                        onRetry: loadData,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    AdminStatGrid(
+                      stats: [
+                        AdminStat(
+                          label: 'Tổng log',
+                          value: '${logs.length}',
+                          icon: Icons.monitor_heart_rounded,
+                          color: const Color(0xFF7C3AED),
+                        ),
+                        AdminStat(
+                          label: 'Hôm nay',
+                          value: '$todayLogs',
+                          icon: Icons.today_rounded,
+                          color: const Color(0xFF22C55E),
+                        ),
+                        AdminStat(
+                          label: 'Task',
+                          value: '$taskLogs',
+                          icon: Icons.task_alt_rounded,
+                          color: const Color(0xFF2563EB),
+                        ),
+                        AdminStat(
+                          label: 'Duyệt',
+                          value: '$approvalLogs',
+                          icon: Icons.fact_check_rounded,
+                          color: const Color(0xFFF59E0B),
+                        ),
+                      ],
                     ),
-
-                    const SizedBox(height: 20),
-
+                    const SizedBox(height: 18),
                     _FilterPanel(
+                      users: users,
+                      workspaces: workspaces,
                       selectedActionType: selectedActionType,
                       selectedUserId: selectedUserId,
                       selectedWorkspaceId: selectedWorkspaceId,
@@ -312,291 +332,41 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
                       },
                       onClear: clearFilters,
                     ),
-
-                    const SizedBox(height: 20),
-
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Activity Log',
-                            style: TextStyle(
-                              color: Color(0xFF111827),
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEDE9FE),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            '${visibleLogs.length} log',
-                            style: const TextStyle(
-                              color: Color(0xFF6D28D9),
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 18),
+                    AdminSectionTitle(
+                      title: 'Activity Log',
+                      countLabel: '${visibleLogs.length} log',
                     ),
-
-                    const SizedBox(height: 8),
-
-                    const Text(
-                      'Admin có thể theo dõi lịch sử hoạt động trong hệ thống.',
-                      style: TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
+                    const SizedBox(height: 14),
                     if (visibleLogs.isEmpty)
-                      const _EmptyLogList()
+                      const AdminEmptyState(
+                        icon: Icons.history_toggle_off_rounded,
+                        message: 'Không có log nào phù hợp bộ lọc.',
+                      )
                     else
                       ...visibleLogs.map((log) {
                         final config = _getActionConfig(log.actionType);
-
-                        return _ActivityLogCard(
-                          log: log,
-                          actionConfig: config,
-                          workspaceName: getWorkspaceName(log.workspaceId),
-                          onTap: () => showLogDetail(log),
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _ActivityLogCard(
+                            log: log,
+                            actionConfig: config,
+                            workspaceName: getWorkspaceName(log.workspaceId),
+                            onTap: () => showLogDetail(log),
+                          ),
                         );
                       }),
                   ],
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  final VoidCallback onBack;
-
-  const _Header({
-    required this.onBack,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFF111827),
-            Color(0xFF7C3AED),
-          ],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
-        ),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: onBack,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: Colors.white,
-                size: 19,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Text(
-              'Activity Log',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 21,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.history_rounded,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewPanel extends StatelessWidget {
-  final int totalLogs;
-  final int todayLogs;
-  final int taskLogs;
-  final int approvalLogs;
-
-  const _OverviewPanel({
-    required this.totalLogs,
-    required this.todayLogs,
-    required this.taskLogs,
-    required this.approvalLogs,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF111827),
-            Color(0xFF7C3AED),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF7C3AED).withOpacity(0.22),
-            blurRadius: 18,
-            offset: const Offset(0, 9),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.monitor_heart_rounded,
-                color: Colors.white,
-                size: 30,
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Tổng quan hoạt động',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          Row(
-            children: [
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Tổng log',
-                  value: '$totalLogs',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Hôm nay',
-                  value: '$todayLogs',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Task',
-                  value: '$taskLogs',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Duyệt',
-                  value: '$approvalLogs',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewMiniStat extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _OverviewMiniStat({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 13,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
       ),
     );
   }
 }
 
 class _FilterPanel extends StatelessWidget {
+  final List<MockUser> users;
+  final List<MockWorkspace> workspaces;
   final String selectedActionType;
   final String selectedUserId;
   final String selectedWorkspaceId;
@@ -606,6 +376,8 @@ class _FilterPanel extends StatelessWidget {
   final VoidCallback onClear;
 
   const _FilterPanel({
+    required this.users,
+    required this.workspaces,
     required this.selectedActionType,
     required this.selectedUserId,
     required this.selectedWorkspaceId,
@@ -617,19 +389,11 @@ class _FilterPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
+    return AdminCard(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.filter_alt_outlined,
-                color: Color(0xFF7C3AED),
-              ),
-              const SizedBox(width: 8),
               const Expanded(
                 child: Text(
                   'Bộ lọc Activity',
@@ -640,71 +404,48 @@ class _FilterPanel extends StatelessWidget {
                   ),
                 ),
               ),
-              TextButton(
-                onPressed: onClear,
-                child: const Text('Xóa lọc'),
-              ),
+              TextButton(onPressed: onClear, child: const Text('Xóa lọc')),
             ],
           ),
-
-          const SizedBox(height: 14),
-
+          const SizedBox(height: 10),
           DropdownButtonFormField<String>(
             value: selectedActionType,
-            decoration: _inputDecoration(
-              hintText: 'Lọc theo hành động',
+            decoration: adminInputDecoration(
+              label: 'Lọc theo hành động',
               icon: Icons.category_outlined,
             ),
             items: [
-              const DropdownMenuItem(
-                value: 'all',
-                child: Text('Tất cả hành động'),
-              ),
+              const DropdownMenuItem(value: 'all', child: Text('Tất cả hành động')),
               ...activityActionTypes.map((type) {
-                return DropdownMenuItem(
-                  value: type,
-                  child: Text(type),
-                );
+                return DropdownMenuItem(value: type, child: Text(type));
               }),
             ],
             onChanged: (value) {
-              if (value == null) return;
-              onActionChanged(value);
+              if (value != null) onActionChanged(value);
             },
           ),
-
           const SizedBox(height: 12),
-
           DropdownButtonFormField<String>(
             value: selectedUserId,
-            decoration: _inputDecoration(
-              hintText: 'Lọc theo user',
+            decoration: adminInputDecoration(
+              label: 'Lọc theo user',
               icon: Icons.person_outline_rounded,
             ),
             items: [
-              const DropdownMenuItem(
-                value: 'all',
-                child: Text('Tất cả user'),
-              ),
-              ...mockUsers.map((user) {
-                return DropdownMenuItem(
-                  value: user.id,
-                  child: Text(user.fullName),
-                );
+              const DropdownMenuItem(value: 'all', child: Text('Tất cả user')),
+              ...users.map((user) {
+                return DropdownMenuItem(value: user.id, child: Text(user.fullName));
               }),
             ],
             onChanged: (value) {
-              if (value == null) return;
-              onUserChanged(value);
+              if (value != null) onUserChanged(value);
             },
           ),
-
           const SizedBox(height: 12),
-
           DropdownButtonFormField<String>(
             value: selectedWorkspaceId,
-            decoration: _inputDecoration(
-              hintText: 'Lọc theo workspace',
+            decoration: adminInputDecoration(
+              label: 'Lọc theo workspace',
               icon: Icons.workspaces_outline,
             ),
             items: [
@@ -712,7 +453,7 @@ class _FilterPanel extends StatelessWidget {
                 value: 'all',
                 child: Text('Tất cả workspace'),
               ),
-              ...mockWorkspaces.map((workspace) {
+              ...workspaces.map((workspace) {
                 return DropdownMenuItem(
                   value: workspace.id,
                   child: Text(workspace.name),
@@ -720,27 +461,10 @@ class _FilterPanel extends StatelessWidget {
               }),
             ],
             onChanged: (value) {
-              if (value == null) return;
-              onWorkspaceChanged(value);
+              if (value != null) onWorkspaceChanged(value);
             },
           ),
         ],
-      ),
-    );
-  }
-
-  InputDecoration _inputDecoration({
-    required String hintText,
-    required IconData icon,
-  }) {
-    return InputDecoration(
-      hintText: hintText,
-      prefixIcon: Icon(icon),
-      filled: true,
-      fillColor: const Color(0xFFF3F4F6),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide.none,
       ),
     );
   }
@@ -763,11 +487,8 @@ class _ActivityLogCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(26),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.all(16),
-        decoration: _cardDecoration(),
+      borderRadius: BorderRadius.circular(22),
+      child: AdminCard(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -778,24 +499,16 @@ class _ActivityLogCard extends StatelessWidget {
                 color: actionConfig.color.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(17),
               ),
-              child: Icon(
-                actionConfig.icon,
-                color: actionConfig.color,
-              ),
+              child: Icon(actionConfig.icon, color: actionConfig.color),
             ),
-
             const SizedBox(width: 13),
-
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      _ActionBadge(
-                        label: actionConfig.label,
-                        color: actionConfig.color,
-                      ),
+                      AdminPill(label: actionConfig.label, color: actionConfig.color),
                       const Spacer(),
                       Text(
                         log.createdAt,
@@ -807,9 +520,7 @@ class _ActivityLogCard extends StatelessWidget {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 8),
-
                   Text(
                     log.title,
                     style: const TextStyle(
@@ -819,9 +530,7 @@ class _ActivityLogCard extends StatelessWidget {
                       height: 1.25,
                     ),
                   ),
-
                   const SizedBox(height: 6),
-
                   Text(
                     log.description,
                     maxLines: 2,
@@ -832,9 +541,7 @@ class _ActivityLogCard extends StatelessWidget {
                       height: 1.35,
                     ),
                   ),
-
                   const SizedBox(height: 10),
-
                   Row(
                     children: [
                       CircleAvatar(
@@ -861,12 +568,6 @@ class _ActivityLogCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const Icon(
-                        Icons.workspaces_outline,
-                        size: 15,
-                        color: Color(0xFF9CA3AF),
-                      ),
-                      const SizedBox(width: 4),
                       Flexible(
                         child: Text(
                           workspaceName,
@@ -890,38 +591,6 @@ class _ActivityLogCard extends StatelessWidget {
   }
 }
 
-class _ActionBadge extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _ActionBadge({
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 9,
-        vertical: 5,
-      ),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w900,
-          fontSize: 11,
-        ),
-      ),
-    );
-  }
-}
-
 class _DetailBlock extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -935,76 +604,39 @@ class _DetailBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            icon,
-            color: const Color(0xFF7C3AED),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Color(0xFF111827),
-                    fontWeight: FontWeight.w900,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AdminCard(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: const Color(0xFF7C3AED)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  content,
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
+                  const SizedBox(height: 5),
+                  Text(
+                    content,
+                    style: const TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyLogList extends StatelessWidget {
-  const _EmptyLogList();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: _cardDecoration(),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.history_toggle_off_rounded,
-            size: 46,
-            color: Color(0xFF9CA3AF),
-          ),
-          SizedBox(height: 10),
-          Text(
-            'Không có log nào phù hợp bộ lọc',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1015,23 +647,9 @@ class _ActionConfig {
   final Color color;
   final IconData icon;
 
-  _ActionConfig({
+  const _ActionConfig({
     required this.label,
     required this.color,
     required this.icon,
   });
-}
-
-BoxDecoration _cardDecoration() {
-  return BoxDecoration(
-    color: Colors.white,
-    borderRadius: BorderRadius.circular(26),
-    boxShadow: [
-      BoxShadow(
-        color: Colors.black.withOpacity(0.055),
-        blurRadius: 16,
-        offset: const Offset(0, 7),
-      ),
-    ],
-  );
 }

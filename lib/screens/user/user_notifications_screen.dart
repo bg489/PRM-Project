@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../data/mock_notifications.dart';
-import '../../data/mock_tasks.dart';
 import '../../data/mock_users.dart';
+import '../../services/app_data_service.dart';
 import '../task/task_detail_screen.dart';
 
 class UserNotificationsScreen extends StatefulWidget {
@@ -19,17 +19,35 @@ class UserNotificationsScreen extends StatefulWidget {
 }
 
 class _UserNotificationsScreenState extends State<UserNotificationsScreen> {
-  late List<MockUserNotification> notifications;
-
+  List<MockUserNotification> notifications = const [];
   String selectedFilter = 'all';
+  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    loadNotifications();
+  }
 
-    notifications = mockUserNotifications
-        .where((notification) => notification.targetUserId == widget.user.id)
-        .toList();
+  Future<void> loadNotifications() async {
+    try {
+      final fetchedNotifications = await AppDataService.fetchNotifications(
+        userId: widget.user.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        notifications = fetchedNotifications;
+        isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        notifications = mockUserNotifications
+            .where((notification) => notification.targetUserId == widget.user.id)
+            .toList();
+        isLoading = false;
+      });
+    }
   }
 
   List<MockUserNotification> get filteredNotifications {
@@ -44,53 +62,49 @@ class _UserNotificationsScreenState extends State<UserNotificationsScreen> {
     return notifications.where((notification) => !notification.isRead).length;
   }
 
-  int get taskNotificationCount {
-    return notifications.where((notification) {
-      return notification.type == 'TASK_ASSIGNED' ||
-          notification.type == 'COMMENT_ADDED' ||
-          notification.type == 'DEADLINE_REMINDER';
-    }).length;
-  }
-
-  int get approvalNotificationCount {
-    return notifications.where((notification) {
-      return notification.type == 'APPROVAL_APPROVED' ||
-          notification.type == 'APPROVAL_REJECTED';
-    }).length;
-  }
-
-  void markAsRead(MockUserNotification notification) {
+  Future<void> markAsRead(MockUserNotification notification) async {
     setState(() {
       notifications = notifications.map((item) {
-        if (item.id == notification.id) {
-          return item.copyWith(isRead: true);
-        }
-
-        return item;
+        return item.id == notification.id ? item.copyWith(isRead: true) : item;
       }).toList();
     });
+
+    try {
+      await AppDataService.markNotificationRead(notification.id);
+    } catch (_) {}
   }
 
-  void markAllAsRead() {
+  Future<void> markAllAsRead() async {
+    final unreadNotifications =
+        notifications.where((notification) => !notification.isRead).toList();
     setState(() {
       notifications = notifications.map((item) {
         return item.copyWith(isRead: true);
       }).toList();
     });
-
-    showMessage('Đã đánh dấu tất cả là đã đọc');
+    for (final notification in unreadNotifications) {
+      try {
+        await AppDataService.markNotificationRead(notification.id);
+      } catch (_) {}
+    }
   }
 
-  void deleteNotification(MockUserNotification notification) {
+  Future<void> deleteNotification(MockUserNotification notification) async {
     setState(() {
-      notifications.removeWhere((item) => item.id == notification.id);
+      notifications = notifications
+          .where((item) => item.id != notification.id)
+          .toList();
     });
 
-    showMessage('Đã xóa thông báo mock');
+    try {
+      await AppDataService.deleteNotification(notification.id);
+    } catch (error) {
+      showMessage('Không thể xóa thông báo: $error');
+    }
   }
 
-  void openNotification(MockUserNotification notification) {
-    markAsRead(notification);
+  Future<void> openNotification(MockUserNotification notification) async {
+    await markAsRead(notification);
 
     if (notification.taskId == null) {
       showMessage('Thông báo này không liên kết với task cụ thể');
@@ -98,152 +112,65 @@ class _UserNotificationsScreenState extends State<UserNotificationsScreen> {
     }
 
     try {
-      final task = mockTasks.firstWhere(
-            (task) => task.id == notification.taskId,
-      );
-
+      final detail = await AppDataService.fetchTaskDetail(notification.taskId!);
+      if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => TaskDetailScreen(
-            task: task,
+            task: detail.task,
             currentUser: widget.user,
           ),
         ),
       );
-    } catch (_) {
-      showMessage('Không tìm thấy task liên quan trong mock data');
+    } catch (error) {
+      showMessage('Không thể mở task liên quan: $error');
     }
   }
 
   void showNotificationDetail(MockUserNotification notification) {
-    final config = _getNotificationConfig(notification.type);
-
     markAsRead(notification);
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (bottomSheetContext) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.62,
-          minChildSize: 0.38,
-          maxChildSize: 0.86,
-          builder: (context, scrollController) {
-            return Container(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(28),
-                  topRight: Radius.circular(28),
+      showDragHandle: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                notification.title,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
-              child: SingleChildScrollView(
-                controller: scrollController,
-                child: Column(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE5E7EB),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    Container(
-                      width: 68,
-                      height: 68,
-                      decoration: BoxDecoration(
-                        color: config.color.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Icon(
-                        config.icon,
-                        color: config.color,
-                        size: 34,
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    Text(
-                      notification.title,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Color(0xFF111827),
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        height: 1.25,
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    _TypeBadge(
-                      label: config.label,
-                      color: config.color,
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    _DetailBlock(
-                      icon: Icons.message_outlined,
-                      title: 'Nội dung',
-                      content: notification.message,
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _DetailBlock(
-                      icon: Icons.access_time_rounded,
-                      title: 'Thời gian',
-                      content: notification.createdAt,
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _DetailBlock(
-                      icon: Icons.info_outline_rounded,
-                      title: 'Trạng thái',
-                      content:
-                      notification.isRead ? 'Đã đọc' : 'Chưa đọc',
-                    ),
-
-                    if (notification.taskId != null) ...[
-                      const SizedBox(height: 18),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 50,
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.pop(bottomSheetContext);
-                            openNotification(notification);
-                          },
-                          icon: const Icon(Icons.open_in_new_rounded),
-                          label: const Text('Mở task liên quan'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF7C3AED),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            textStyle: const TextStyle(
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+              const SizedBox(height: 10),
+              Text(notification.message),
+              const SizedBox(height: 14),
+              Text(
+                notification.createdAt,
+                style: const TextStyle(color: Color(0xFF6B7280)),
               ),
-            );
-          },
+              if (notification.taskId != null) ...[
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      openNotification(notification);
+                    },
+                    icon: const Icon(Icons.open_in_new_rounded),
+                    label: const Text('Mở task liên quan'),
+                  ),
+                ),
+              ],
+            ],
+          ),
         );
       },
     );
@@ -258,7 +185,68 @@ class _UserNotificationsScreenState extends State<UserNotificationsScreen> {
     );
   }
 
-  _NotificationConfig _getNotificationConfig(String type) {
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F7FB),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final visibleNotifications = filteredNotifications;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F7FB),
+      appBar: AppBar(
+        title: Text('Thông báo ($unreadCount chưa đọc)'),
+        backgroundColor: const Color(0xFF7C3AED),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            onPressed: unreadCount == 0 ? null : markAllAsRead,
+            icon: const Icon(Icons.done_all_rounded),
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: loadNotifications,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            _FilterChips(
+              selectedFilter: selectedFilter,
+              onChanged: (value) {
+                setState(() {
+                  selectedFilter = value;
+                });
+              },
+            ),
+            const SizedBox(height: 18),
+            if (visibleNotifications.isEmpty)
+              const _EmptyState()
+            else
+              ...visibleNotifications.map((notification) {
+                final config = _notificationConfig(notification.type);
+                return _NotificationTile(
+                  notification: notification,
+                  icon: config.icon,
+                  color: config.color,
+                  label: config.label,
+                  onTap: () => showNotificationDetail(notification),
+                  onOpenTask: notification.taskId == null
+                      ? null
+                      : () => openNotification(notification),
+                  onDelete: () => deleteNotification(notification),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  _NotificationConfig _notificationConfig(String type) {
     switch (type) {
       case 'TASK_ASSIGNED':
         return _NotificationConfig(
@@ -286,7 +274,7 @@ class _UserNotificationsScreenState extends State<UserNotificationsScreen> {
         );
       case 'APPROVAL_REJECTED':
         return _NotificationConfig(
-          label: 'Bị từ chối',
+          label: 'Từ chối',
           color: const Color(0xFFEF4444),
           icon: Icons.cancel_rounded,
         );
@@ -297,359 +285,6 @@ class _UserNotificationsScreenState extends State<UserNotificationsScreen> {
           icon: Icons.notifications_none_rounded,
         );
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final visibleNotifications = filteredNotifications;
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _Header(
-              user: widget.user,
-              unreadCount: unreadCount,
-              onBack: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _OverviewPanel(
-                      total: notifications.length,
-                      unread: unreadCount,
-                      taskCount: taskNotificationCount,
-                      approvalCount: approvalNotificationCount,
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    _FilterChips(
-                      selectedFilter: selectedFilter,
-                      onChanged: (value) {
-                        setState(() {
-                          selectedFilter = value;
-                        });
-                      },
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Thông báo của tôi',
-                            style: TextStyle(
-                              color: Color(0xFF111827),
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        TextButton.icon(
-                          onPressed: unreadCount == 0 ? null : markAllAsRead,
-                          icon: const Icon(Icons.done_all_rounded),
-                          label: const Text('Đọc hết'),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    const Text(
-                      'Theo dõi task được giao, bình luận, deadline và trạng thái duyệt requirement.',
-                      style: TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontWeight: FontWeight.w600,
-                        height: 1.4,
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    if (visibleNotifications.isEmpty)
-                      const _EmptyNotificationList()
-                    else
-                      ...visibleNotifications.map((notification) {
-                        final config =
-                        _getNotificationConfig(notification.type);
-
-                        return _NotificationCard(
-                          notification: notification,
-                          config: config,
-                          onTap: () => showNotificationDetail(notification),
-                          onOpenTask: () => openNotification(notification),
-                          onDelete: () => deleteNotification(notification),
-                        );
-                      }),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  final MockUser user;
-  final int unreadCount;
-  final VoidCallback onBack;
-
-  const _Header({
-    required this.user,
-    required this.unreadCount,
-    required this.onBack,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFF2563EB),
-            Color(0xFF9333EA),
-          ],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
-        ),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: onBack,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: Colors.white,
-                size: 19,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Trung tâm thông báo',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  user.fullName,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 21,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(
-                  Icons.notifications_rounded,
-                  color: Colors.white,
-                ),
-              ),
-              if (unreadCount > 0)
-                Positioned(
-                  top: -6,
-                  right: -6,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF97316),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      '$unreadCount',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewPanel extends StatelessWidget {
-  final int total;
-  final int unread;
-  final int taskCount;
-  final int approvalCount;
-
-  const _OverviewPanel({
-    required this.total,
-    required this.unread,
-    required this.taskCount,
-    required this.approvalCount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF2563EB),
-            Color(0xFF9333EA),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF7C3AED).withOpacity(0.22),
-            blurRadius: 18,
-            offset: const Offset(0, 9),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.notifications_active_rounded,
-                color: Colors.white,
-                size: 30,
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Tổng quan thông báo',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Tổng',
-                  value: '$total',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Chưa đọc',
-                  value: '$unread',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Task',
-                  value: '$taskCount',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Duyệt',
-                  value: '$approvalCount',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewMiniStat extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _OverviewMiniStat({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 13,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -679,20 +314,11 @@ class _FilterChips extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: filters.map((filter) {
-          final isSelected = selectedFilter == filter.value;
-
           return Padding(
             padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(
-              selected: isSelected,
+              selected: selectedFilter == filter.value,
               label: Text(filter.label),
-              selectedColor: const Color(0xFFEDE9FE),
-              labelStyle: TextStyle(
-                color: isSelected
-                    ? const Color(0xFF6D28D9)
-                    : const Color(0xFF374151),
-                fontWeight: FontWeight.w800,
-              ),
               onSelected: (_) => onChanged(filter.value),
             ),
           );
@@ -702,16 +328,20 @@ class _FilterChips extends StatelessWidget {
   }
 }
 
-class _NotificationCard extends StatelessWidget {
+class _NotificationTile extends StatelessWidget {
   final MockUserNotification notification;
-  final _NotificationConfig config;
+  final IconData icon;
+  final Color color;
+  final String label;
   final VoidCallback onTap;
-  final VoidCallback onOpenTask;
+  final VoidCallback? onOpenTask;
   final VoidCallback onDelete;
 
-  const _NotificationCard({
+  const _NotificationTile({
     required this.notification,
-    required this.config,
+    required this.icon,
+    required this.color,
+    required this.label,
     required this.onTap,
     required this.onOpenTask,
     required this.onDelete,
@@ -721,19 +351,13 @@ class _NotificationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(26),
+      borderRadius: BorderRadius.circular(18),
       child: Container(
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: notification.isRead ? Colors.white : const Color(0xFFFFFBEB),
-          borderRadius: BorderRadius.circular(26),
-          border: Border.all(
-            color: notification.isRead
-                ? Colors.transparent
-                : const Color(0xFFFDE68A),
-            width: 1.2,
-          ),
+          borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.055),
@@ -743,135 +367,56 @@ class _NotificationCard extends StatelessWidget {
           ],
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: config.color.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: Icon(
-                        config.icon,
-                        color: config.color,
-                      ),
-                    ),
-                    if (!notification.isRead)
-                      Positioned(
-                        top: -3,
-                        right: -3,
-                        child: Container(
-                          width: 11,
-                          height: 11,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF97316),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.white,
-                              width: 2,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
+                Icon(icon, color: color),
+                const SizedBox(width: 10),
+                Text(
+                  label,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w900),
                 ),
-
-                const SizedBox(width: 13),
-
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          _TypeBadge(
-                            label: config.label,
-                            color: config.color,
-                          ),
-                          const Spacer(),
-                          Text(
-                            notification.createdAt,
-                            style: const TextStyle(
-                              color: Color(0xFF9CA3AF),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        notification.title,
-                        style: const TextStyle(
-                          color: Color(0xFF111827),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          height: 1.25,
-                        ),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      Text(
-                        notification.message,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF6B7280),
-                          fontWeight: FontWeight.w600,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
+                const Spacer(),
+                Text(
+                  notification.createdAt,
+                  style: const TextStyle(color: Color(0xFF9CA3AF)),
                 ),
               ],
             ),
-
-            const SizedBox(height: 14),
-
+            const SizedBox(height: 10),
+            Text(
+              notification.title,
+              style: const TextStyle(
+                color: Color(0xFF111827),
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              notification.message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFF6B7280)),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
-                if (notification.taskId != null)
+                if (onOpenTask != null)
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: onOpenTask,
-                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                      icon: const Icon(Icons.open_in_new_rounded),
                       label: const Text('Mở task'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF2563EB),
-                        side: const BorderSide(
-                          color: Color(0xFFBFDBFE),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
                     ),
                   ),
-                if (notification.taskId != null) const SizedBox(width: 8),
+                if (onOpenTask != null) const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    icon: const Icon(Icons.delete_outline_rounded),
                     label: const Text('Xóa'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFEF4444),
-                      side: const BorderSide(
-                        color: Color(0xFFFECACA),
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
                   ),
                 ),
               ],
@@ -883,131 +428,15 @@ class _NotificationCard extends StatelessWidget {
   }
 }
 
-class _TypeBadge extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _TypeBadge({
-    required this.label,
-    required this.color,
-  });
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 9,
-        vertical: 5,
-      ),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w900,
-          fontSize: 11,
-        ),
-      ),
-    );
-  }
-}
-
-class _DetailBlock extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String content;
-
-  const _DetailBlock({
-    required this.icon,
-    required this.title,
-    required this.content,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            icon,
-            color: const Color(0xFF7C3AED),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Color(0xFF111827),
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  content,
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyNotificationList extends StatelessWidget {
-  const _EmptyNotificationList();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.055),
-            blurRadius: 16,
-            offset: const Offset(0, 7),
-          ),
-        ],
-      ),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.notifications_off_outlined,
-            size: 46,
-            color: Color(0xFF9CA3AF),
-          ),
-          SizedBox(height: 10),
-          Text(
-            'Không có thông báo nào phù hợp',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(32),
+        child: Text('Không có thông báo nào phù hợp'),
       ),
     );
   }

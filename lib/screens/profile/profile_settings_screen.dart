@@ -2,12 +2,18 @@ import 'package:flutter/material.dart';
 import '../../data/mock_users.dart';
 import '../../data/mock_tasks.dart';
 import '../../data/mock_workspaces.dart';
+import '../../services/app_data_service.dart';
 import '../auth/login_screen.dart';
 import '../../utils/app_navigation.dart';
 import '../user/edit_profile_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../utils/app_notification_service.dart';
+import '../../utils/app_theme_controller.dart';
+import '../user/security_settings_screen.dart';
+import '../../utils/app_language_controller.dart';
+import '../../utils/app_text.dart';
+import '../user/language_settings_screen.dart';
 
 class ProfileSettingsScreen extends StatefulWidget {
   final MockUser user;
@@ -37,7 +43,37 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   void initState() {
     super.initState();
     currentUser = widget.user;
+    notificationEnabled = currentUser.notificationEnabled;
+    darkModeEnabled = appThemeController.isDarkMode;
+    appThemeController.addListener(syncDarkModeState);
     loadNotificationSetting();
+  }
+
+  @override
+  void dispose() {
+    appThemeController.removeListener(syncDarkModeState);
+    super.dispose();
+  }
+
+  void syncDarkModeState() {
+    if (!mounted) return;
+
+    setState(() {
+      darkModeEnabled = appThemeController.isDarkMode;
+    });
+  }
+
+  Future<void> updateDarkModeSetting(bool value) async {
+    await appThemeController.setDarkMode(value);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(value ? 'Đã bật chế độ tối' : 'Đã tắt chế độ tối'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> loadNotificationSetting() async {
@@ -46,7 +82,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     if (!mounted) return;
 
     setState(() {
-      notificationEnabled = prefs.getBool(notificationSettingKey) ?? true;
+      notificationEnabled =
+          prefs.getBool(notificationSettingKey) ?? currentUser.notificationEnabled;
     });
   }
 
@@ -79,6 +116,16 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       });
 
       await prefs.setBool(notificationSettingKey, true);
+      final updatedUser = await AppDataService.updateSecurity(
+        userId: currentUser.id,
+        notificationEnabled: true,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        currentUser = updatedUser;
+      });
 
       await AppNotificationService.showNotificationEnabledTest();
 
@@ -96,6 +143,15 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       });
 
       await prefs.setBool(notificationSettingKey, false);
+      final updatedUser = await AppDataService.updateSecurity(
+        userId: currentUser.id,
+        notificationEnabled: false,
+      );
+      if (!mounted) return;
+      setState(() {
+        currentUser = updatedUser;
+      });
+
       await AppNotificationService.cancelAll();
 
       if (!mounted) return;
@@ -110,11 +166,11 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   }
 
   int get completedTasks {
-    return widget.tasks.where((task) => task.status == 'Đã xong').length;
+    return widget.tasks.where((task) => task.status == kanbanColumns.last).length;
   }
 
   int get pendingTasks {
-    return widget.tasks.where((task) => task.status != 'Đã xong').length;
+    return widget.tasks.where((task) => task.status != kanbanColumns.last).length;
   }
 
   int get highPriorityTasks {
@@ -139,8 +195,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               child: const Text('Hủy'),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 Navigator.pop(dialogContext);
+                await AppDataService.logout();
 
                 Navigator.pushAndRemoveUntil(
                   context,
@@ -165,7 +222,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   void showFeatureMessage(String title) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('$title đang dùng mock UI'),
+        content: Text('$title đang được phát triển'),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -189,7 +246,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Đã cập nhật hồ sơ mock'),
+        content: Text('Đã cập nhật hồ sơ'),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -197,7 +254,10 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+  return AnimatedBuilder(
+    animation: appLanguageController,
+    builder: (context, _) {
+      return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       bottomNavigationBar: _ProfileBottomNavBar(
         user: currentUser,
@@ -269,29 +329,24 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: _SectionCard(
-                  title: 'Thông báo',
+                  title: AppText.t('notifications'),
                   icon: Icons.notifications_active_outlined,
                   child: Column(
                     children: [
                       _SwitchSettingTile(
                         icon: Icons.notifications_none_rounded,
-                        title: 'Thông báo đẩy',
-                        subtitle:
-                        'Nhận thông báo khi được giao việc hoặc có bình luận mới',
+                        title: AppText.t('push_notifications'),
+                        subtitle: AppText.t('push_notifications_desc'),
                         value: notificationEnabled,
                         onChanged: updateNotificationSetting,
                       ),
                       const Divider(height: 1),
                       _SwitchSettingTile(
                         icon: Icons.dark_mode_outlined,
-                        title: 'Chế độ tối',
-                        subtitle: 'Giao diện tối cho buổi tối',
+                        title: AppText.t('dark_mode'),
+                        subtitle: AppText.t('dark_mode_desc'),
                         value: darkModeEnabled,
-                        onChanged: (value) {
-                          setState(() {
-                            darkModeEnabled = value;
-                          });
-                        },
+                        onChanged: updateDarkModeSetting,
                       ),
                     ],
                   ),
@@ -303,36 +358,45 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: _SectionCard(
-                  title: 'Cài đặt tài khoản',
+                  title: AppText.t('account_settings'),
                   icon: Icons.settings_outlined,
                   child: Column(
                     children: [
                       _SettingTile(
-                        icon: Icons.person_outline_rounded,
-                        title: 'Tài khoản cá nhân',
-                        subtitle: 'Cập nhật họ tên, avatar, thông tin hồ sơ',
-                        onTap: openEditProfileScreen,
-                      ),
-                      const Divider(height: 1),
-                      _SettingTile(
                         icon: Icons.security_rounded,
-                        title: 'Bảo mật',
-                        subtitle: 'Đổi mật khẩu và quản lý phiên đăng nhập',
-                        onTap: () => showFeatureMessage('Bảo mật'),
+                        title: AppText.t('security'),
+                        subtitle: AppText.t('security_desc'),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => SecuritySettingsScreen(
+                                user: currentUser,
+                              ),
+                            ),
+                          );
+                        },
                       ),
                       const Divider(height: 1),
                       _SettingTile(
                         icon: Icons.language_rounded,
-                        title: 'Ngôn ngữ',
-                        subtitle: 'Tiếng Việt',
-                        onTap: () => showFeatureMessage('Ngôn ngữ'),
+                        title: AppText.t('language'),
+                        subtitle: appLanguageController.languageLabel,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const LanguageSettingsScreen(),
+                            ),
+                          );
+                        },
                       ),
                       const Divider(height: 1),
                       _SettingTile(
                         icon: Icons.help_outline_rounded,
-                        title: 'Trợ giúp & hỗ trợ',
-                        subtitle: 'FAQ, hướng dẫn sử dụng và liên hệ hỗ trợ',
-                        onTap: () => showFeatureMessage('Trợ giúp'),
+                        title: AppText.t('help_support'),
+                        subtitle: AppText.t('help_support_desc'),
+                        onTap: () => showFeatureMessage(AppText.t('help_support')),
                       ),
                     ],
                   ),
@@ -366,7 +430,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                             SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                'JWT Token mock đang được ghi nhớ trên thiết bị',
+                                'JWT Token đang được ghi nhớ trên thiết bị',
                                 style: TextStyle(
                                   color: Color(0xFF374151),
                                   fontWeight: FontWeight.w700,
@@ -410,8 +474,10 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           ),
         ),
       ),
-    );
-  }
+      );
+      },
+        );
+          }
 }
 
 class _ProfileHeader extends StatelessWidget {

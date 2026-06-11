@@ -14,12 +14,35 @@ class MockWorkspace {
     required this.projectCount,
     required this.iconText,
   });
+
+  factory MockWorkspace.fromJson(Map<String, dynamic> json) {
+    return MockWorkspace(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      memberCount: (json['memberCount'] as num?)?.toInt() ?? 0,
+      projectCount: (json['projectCount'] as num?)?.toInt() ?? 0,
+      iconText: json['iconText']?.toString() ?? 'WS',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'memberCount': memberCount,
+      'projectCount': projectCount,
+      'iconText': iconText,
+    };
+  }
 }
 
 class MockProject {
   final String id;
   final String workspaceId;
   final String name;
+  final String description;
   final String code;
   final String deadline;
   final double progress;
@@ -32,6 +55,7 @@ class MockProject {
     required this.id,
     required this.workspaceId,
     required this.name,
+    this.description = '',
     required this.code,
     required this.deadline,
     required this.progress,
@@ -40,6 +64,42 @@ class MockProject {
     required this.members,
     required this.status,
   });
+
+  factory MockProject.fromJson(Map<String, dynamic> json) {
+    return MockProject(
+      id: json['id']?.toString() ?? '',
+      workspaceId: json['workspaceId']?.toString() ??
+          json['workspace_id']?.toString() ??
+          '',
+      name: json['name']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      code: json['code']?.toString() ?? '',
+      deadline: json['deadline']?.toString() ?? '',
+      progress: (json['progress'] as num?)?.toDouble() ?? 0,
+      totalTasks: (json['totalTasks'] as num?)?.toInt() ?? 0,
+      completedTasks: (json['completedTasks'] as num?)?.toInt() ?? 0,
+      members: (json['members'] as List<dynamic>? ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      status: json['status']?.toString() ?? 'Active',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workspaceId': workspaceId,
+      'name': name,
+      'description': description,
+      'code': code,
+      'deadline': deadline,
+      'progress': progress,
+      'totalTasks': totalTasks,
+      'completedTasks': completedTasks,
+      'members': members,
+      'status': status,
+    };
+  }
 }
 
 const List<MockWorkspace> mockWorkspaces = [

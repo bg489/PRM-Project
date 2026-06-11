@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/mock_tasks.dart';
 import '../../data/mock_users.dart';
+import '../../services/app_data_service.dart';
 import '../task/task_detail_screen.dart';
 import 'user_approval_requests_screen.dart';
 
@@ -18,54 +19,81 @@ class MyTasksScreen extends StatefulWidget {
 }
 
 class _MyTasksScreenState extends State<MyTasksScreen> {
-  late List<MockTask> myTasks;
-
-  String selectedStatus = 'Tất cả';
+  List<MockTask> myTasks = const [];
+  String selectedStatus = 'all';
   String selectedPriority = 'all';
+  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    loadMyTasks();
+  }
 
-    final assignedTasks = mockTasks.where((task) {
-      return task.assigneeName == widget.user.fullName ||
-          task.assigneeAvatar == widget.user.avatarText;
-    }).toList();
-
-    // Nếu user hiện tại chưa có task trùng tên/avatar trong mock data,
-    // mình cho hiện task mẫu để demo màn "Task của tôi".
-    myTasks = assignedTasks.isNotEmpty
-        ? assignedTasks
-        : mockTasks
-        .where((task) => task.status != 'Đã xong')
-        .take(5)
-        .toList();
+  Future<void> loadMyTasks() async {
+    try {
+      final fetchedTasks = await AppDataService.fetchTasks(
+        assigneeId: widget.user.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        myTasks = fetchedTasks;
+        isLoading = false;
+      });
+    } catch (_) {
+      final assignedTasks = mockTasks.where((task) {
+        return task.assigneeName == widget.user.fullName ||
+            task.assigneeAvatar == widget.user.avatarText;
+      }).toList();
+      if (!mounted) return;
+      setState(() {
+        myTasks = assignedTasks.isNotEmpty
+            ? assignedTasks
+            : mockTasks.where((task) => task.status != 'Đã xong').take(5).toList();
+        isLoading = false;
+      });
+    }
   }
 
   List<MockTask> get filteredTasks {
     return myTasks.where((task) {
-      final matchStatus =
-          selectedStatus == 'Tất cả' || task.status == selectedStatus;
-
-      final matchPriority =
+      final statusOk = selectedStatus == 'all' || task.status == selectedStatus;
+      final priorityOk =
           selectedPriority == 'all' || task.priority == selectedPriority;
-
-      return matchStatus && matchPriority;
+      return statusOk && priorityOk;
     }).toList();
   }
-
-  int get totalTasks => myTasks.length;
 
   int get completedTasks {
     return myTasks.where((task) => task.status == 'Đã xong').length;
   }
 
-  int get pendingTasks {
-    return myTasks.where((task) => task.status != 'Đã xong').length;
-  }
+  Future<void> updateTaskStatus(MockTask task, String newStatus) async {
+    final previousTasks = List<MockTask>.from(myTasks);
+    setState(() {
+      myTasks = myTasks.map((item) {
+        return item.id == task.id ? item.copyWith(status: newStatus) : item;
+      }).toList();
+    });
 
-  int get highPriorityTasks {
-    return myTasks.where((task) => task.priority == 'High').length;
+    try {
+      final updatedTask = await AppDataService.updateTaskStatus(
+        taskId: task.id,
+        status: newStatus,
+      );
+      if (!mounted) return;
+      setState(() {
+        myTasks = myTasks.map((item) {
+          return item.id == updatedTask.id ? updatedTask : item;
+        }).toList();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        myTasks = previousTasks;
+      });
+      showMessage('Không thể cập nhật trạng thái: $error');
+    }
   }
 
   void openTaskDetail(MockTask task) {
@@ -80,19 +108,10 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
     );
   }
 
-  void updateTaskStatus(MockTask task, String newStatus) {
-    setState(() {
-      myTasks = myTasks.map((item) {
-        if (item.id == task.id) {
-          return item.copyWith(status: newStatus);
-        }
-        return item;
-      }).toList();
-    });
-
+  void showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Đã chuyển "${task.title}" sang "$newStatus"'),
+        content: Text(message),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -100,233 +119,109 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F7FB),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final visibleTasks = filteredTasks;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _Header(
-              user: widget.user,
-              onBack: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _OverviewPanel(
-                      totalTasks: totalTasks,
-                      completedTasks: completedTasks,
-                      pendingTasks: pendingTasks,
-                      highPriorityTasks: highPriorityTasks,
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    _ApprovalShortcutCard(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => UserApprovalRequestsScreen(
-                              user: widget.user,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    _FilterPanel(
-                      selectedStatus: selectedStatus,
-                      selectedPriority: selectedPriority,
-                      onStatusChanged: (value) {
-                        setState(() {
-                          selectedStatus = value;
-                        });
-                      },
-                      onPriorityChanged: (value) {
-                        setState(() {
-                          selectedPriority = value;
-                        });
-                      },
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Task của tôi',
-                            style: TextStyle(
-                              color: Color(0xFF111827),
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEDE9FE),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            '${visibleTasks.length} task',
-                            style: const TextStyle(
-                              color: Color(0xFF6D28D9),
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    const Text(
-                      'Danh sách công việc được giao cho bạn trong các project.',
-                      style: TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontWeight: FontWeight.w600,
-                        height: 1.4,
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    if (visibleTasks.isEmpty)
-                      const _EmptyTaskList()
-                    else
-                      ...visibleTasks.map((task) {
-                        return _MyTaskCard(
-                          task: task,
-                          onTap: () => openTaskDetail(task),
-                          onStatusChanged: (status) {
-                            updateTaskStatus(task, status);
-                          },
-                        );
-                      }),
-                  ],
+      appBar: AppBar(
+        title: Text('Task của ${widget.user.fullName}'),
+        backgroundColor: const Color(0xFF7C3AED),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => UserApprovalRequestsScreen(user: widget.user),
                 ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  final MockUser user;
-  final VoidCallback onBack;
-
-  const _Header({
-    required this.user,
-    required this.onBack,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFF2563EB),
-            Color(0xFF9333EA),
-          ],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
-        ),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: onBack,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: Colors.white,
-                size: 19,
-              ),
-            ),
+              );
+            },
+            icon: const Icon(Icons.fact_check_rounded),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: loadMyTasks,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            _StatsCard(
+              totalTasks: myTasks.length,
+              completedTasks: completedTasks,
+              highPriorityTasks:
+                  myTasks.where((task) => task.priority == 'High').length,
+            ),
+            const SizedBox(height: 16),
+            _FilterCard(
+              selectedStatus: selectedStatus,
+              selectedPriority: selectedPriority,
+              onStatusChanged: (value) {
+                setState(() {
+                  selectedStatus = value;
+                });
+              },
+              onPriorityChanged: (value) {
+                setState(() {
+                  selectedPriority = value;
+                });
+              },
+            ),
+            const SizedBox(height: 18),
+            Row(
               children: [
-                const Text(
-                  'Công việc cá nhân',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w700,
+                const Expanded(
+                  child: Text(
+                    'Task của tôi',
+                    style: TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
                 Text(
-                  user.fullName,
-                  overflow: TextOverflow.ellipsis,
+                  '${visibleTasks.length} task',
                   style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 21,
+                    color: Color(0xFF6D28D9),
                     fontWeight: FontWeight.w900,
                   ),
                 ),
               ],
             ),
-          ),
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: Colors.white.withOpacity(0.18),
-            backgroundImage: user.avatarImageBytes == null
-                ? null
-                : MemoryImage(user.avatarImageBytes!),
-            child: user.avatarImageBytes == null
-                ? Text(
-              user.avatarText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-              ),
-            )
-                : null,
-          ),
-        ],
+            const SizedBox(height: 12),
+            if (visibleTasks.isEmpty)
+              const _EmptyState()
+            else
+              ...visibleTasks.map((task) {
+                return _TaskTile(
+                  task: task,
+                  onTap: () => openTaskDetail(task),
+                  onStatusChanged: (status) => updateTaskStatus(task, status),
+                );
+              }),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _OverviewPanel extends StatelessWidget {
+class _StatsCard extends StatelessWidget {
   final int totalTasks;
   final int completedTasks;
-  final int pendingTasks;
   final int highPriorityTasks;
 
-  const _OverviewPanel({
+  const _StatsCard({
     required this.totalTasks,
     required this.completedTasks,
-    required this.pendingTasks,
     required this.highPriorityTasks,
   });
 
@@ -334,121 +229,44 @@ class _OverviewPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF2563EB),
-            Color(0xFF9333EA),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF7C3AED).withOpacity(0.22),
-            blurRadius: 18,
-            offset: const Offset(0, 9),
-          ),
-        ],
-      ),
-      child: Column(
+      decoration: _cardDecoration(),
+      child: Row(
         children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.assignment_ind_rounded,
-                color: Colors.white,
-                size: 30,
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Tổng quan task của tôi',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          Row(
-            children: [
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Tổng',
-                  value: '$totalTasks',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Đã xong',
-                  value: '$completedTasks',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Đang chờ',
-                  value: '$pendingTasks',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OverviewMiniStat(
-                  label: 'Ưu tiên cao',
-                  value: '$highPriorityTasks',
-                ),
-              ),
-            ],
-          ),
+          _StatItem(label: 'Tổng', value: totalTasks),
+          _StatItem(label: 'Đã xong', value: completedTasks),
+          _StatItem(label: 'Ưu tiên cao', value: highPriorityTasks),
         ],
       ),
     );
   }
 }
 
-class _OverviewMiniStat extends StatelessWidget {
+class _StatItem extends StatelessWidget {
   final String label;
-  final String value;
+  final int value;
 
-  const _OverviewMiniStat({
+  const _StatItem({
     required this.label,
     required this.value,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 13,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(18),
-      ),
+    return Expanded(
       child: Column(
         children: [
           Text(
-            value,
+            '$value',
             style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
+              color: Color(0xFF111827),
+              fontSize: 22,
               fontWeight: FontWeight.w900,
             ),
           ),
-          const SizedBox(height: 3),
           Text(
             label,
-            textAlign: TextAlign.center,
             style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
+              color: Color(0xFF6B7280),
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -458,13 +276,13 @@ class _OverviewMiniStat extends StatelessWidget {
   }
 }
 
-class _FilterPanel extends StatelessWidget {
+class _FilterCard extends StatelessWidget {
   final String selectedStatus;
   final String selectedPriority;
   final ValueChanged<String> onStatusChanged;
   final ValueChanged<String> onPriorityChanged;
 
-  const _FilterPanel({
+  const _FilterCard({
     required this.selectedStatus,
     required this.selectedPriority,
     required this.onStatusChanged,
@@ -477,91 +295,32 @@ class _FilterPanel extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: _cardDecoration(),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.filter_alt_outlined,
-                color: Color(0xFF7C3AED),
-              ),
-              SizedBox(width: 8),
-              Text(
-                'Bộ lọc task',
-                style: TextStyle(
-                  color: Color(0xFF111827),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 14),
-
           DropdownButtonFormField<String>(
             value: selectedStatus,
-            decoration: _inputDecoration(
-              hintText: 'Lọc theo trạng thái',
-              icon: Icons.view_kanban_outlined,
-            ),
-            items: const [
-              DropdownMenuItem(
-                value: 'Tất cả',
-                child: Text('Tất cả trạng thái'),
-              ),
-              DropdownMenuItem(
-                value: 'Cần làm',
-                child: Text('Cần làm'),
-              ),
-              DropdownMenuItem(
-                value: 'Đang làm',
-                child: Text('Đang làm'),
-              ),
-              DropdownMenuItem(
-                value: 'Kiểm tra',
-                child: Text('Kiểm tra'),
-              ),
-              DropdownMenuItem(
-                value: 'Đã xong',
-                child: Text('Đã xong'),
-              ),
+            decoration: _inputDecoration('Trạng thái'),
+            items: [
+              const DropdownMenuItem(value: 'all', child: Text('Tất cả')),
+              ...kanbanColumns.map((status) {
+                return DropdownMenuItem(value: status, child: Text(status));
+              }),
             ],
             onChanged: (value) {
-              if (value == null) return;
-              onStatusChanged(value);
+              if (value != null) onStatusChanged(value);
             },
           ),
-
           const SizedBox(height: 12),
-
           DropdownButtonFormField<String>(
             value: selectedPriority,
-            decoration: _inputDecoration(
-              hintText: 'Lọc theo ưu tiên',
-              icon: Icons.flag_outlined,
-            ),
+            decoration: _inputDecoration('Priority'),
             items: const [
-              DropdownMenuItem(
-                value: 'all',
-                child: Text('Tất cả priority'),
-              ),
-              DropdownMenuItem(
-                value: 'High',
-                child: Text('Cao'),
-              ),
-              DropdownMenuItem(
-                value: 'Medium',
-                child: Text('Trung bình'),
-              ),
-              DropdownMenuItem(
-                value: 'Low',
-                child: Text('Thấp'),
-              ),
+              DropdownMenuItem(value: 'all', child: Text('Tất cả')),
+              DropdownMenuItem(value: 'High', child: Text('Cao')),
+              DropdownMenuItem(value: 'Medium', child: Text('Trung bình')),
+              DropdownMenuItem(value: 'Low', child: Text('Thấp')),
             ],
             onChanged: (value) {
-              if (value == null) return;
-              onPriorityChanged(value);
+              if (value != null) onPriorityChanged(value);
             },
           ),
         ],
@@ -569,13 +328,9 @@ class _FilterPanel extends StatelessWidget {
     );
   }
 
-  InputDecoration _inputDecoration({
-    required String hintText,
-    required IconData icon,
-  }) {
+  InputDecoration _inputDecoration(String label) {
     return InputDecoration(
-      hintText: hintText,
-      prefixIcon: Icon(icon),
+      labelText: label,
       filled: true,
       fillColor: const Color(0xFFF3F4F6),
       border: OutlineInputBorder(
@@ -586,12 +341,12 @@ class _FilterPanel extends StatelessWidget {
   }
 }
 
-class _MyTaskCard extends StatelessWidget {
+class _TaskTile extends StatelessWidget {
   final MockTask task;
   final VoidCallback onTap;
   final ValueChanged<String> onStatusChanged;
 
-  const _MyTaskCard({
+  const _TaskTile({
     required this.task,
     required this.onTap,
     required this.onStatusChanged,
@@ -599,14 +354,12 @@ class _MyTaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final priorityConfig = _priorityConfig(task.priority);
-
-    final checklistProgress =
-    task.checklistTotal == 0 ? 0.0 : task.checklistDone / task.checklistTotal;
+    final progress =
+        task.checklistTotal == 0 ? 0.0 : task.checklistDone / task.checklistTotal;
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(26),
+      borderRadius: BorderRadius.circular(18),
       child: Container(
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(16),
@@ -616,124 +369,43 @@ class _MyTaskCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                _PriorityBadge(
-                  label: priorityConfig.label,
-                  color: priorityConfig.color,
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEDE9FE),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
+                Expanded(
                   child: Text(
-                    task.status,
+                    task.title,
                     style: const TextStyle(
-                      color: Color(0xFF6D28D9),
+                      color: Color(0xFF111827),
+                      fontSize: 17,
                       fontWeight: FontWeight.w900,
-                      fontSize: 11,
                     ),
+                  ),
+                ),
+                Text(
+                  task.priority,
+                  style: const TextStyle(
+                    color: Color(0xFF7C3AED),
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ],
             ),
-
-            const SizedBox(height: 12),
-
-            Text(
-              task.title,
-              style: const TextStyle(
-                color: Color(0xFF111827),
-                fontSize: 17,
-                fontWeight: FontWeight.w900,
-                height: 1.25,
-              ),
-            ),
-
-            const SizedBox(height: 7),
-
+            const SizedBox(height: 8),
             Text(
               task.description,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF6B7280),
-                fontWeight: FontWeight.w600,
-                height: 1.35,
-              ),
+              style: const TextStyle(color: Color(0xFF6B7280)),
             ),
-
-            const SizedBox(height: 14),
-
-            Row(
-              children: [
-                _SmallInfoChip(
-                  icon: Icons.calendar_today_outlined,
-                  label: 'Hạn: ${task.dueDate}',
-                ),
-                const SizedBox(width: 8),
-                _SmallInfoChip(
-                  icon: Icons.chat_bubble_outline_rounded,
-                  label: '${task.commentCount} bình luận',
-                ),
-              ],
-            ),
-
             const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Text(
-                  '${task.checklistDone}/${task.checklistTotal}',
-                  style: const TextStyle(
-                    color: Color(0xFF374151),
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      value: checklistProgress,
-                      minHeight: 7,
-                      backgroundColor: const Color(0xFFE5E7EB),
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                        Color(0xFF7C3AED),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 14),
-
+            LinearProgressIndicator(value: progress),
+            const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               value: task.status,
-              decoration: InputDecoration(
-                labelText: 'Cập nhật trạng thái',
-                filled: true,
-                fillColor: const Color(0xFFF3F4F6),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+              decoration: const InputDecoration(labelText: 'Trạng thái'),
               items: kanbanColumns.map((status) {
-                return DropdownMenuItem(
-                  value: status,
-                  child: Text(status),
-                );
+                return DropdownMenuItem(value: status, child: Text(status));
               }).toList(),
               onChanged: (value) {
-                if (value == null) return;
-                onStatusChanged(value);
+                if (value != null) onStatusChanged(value);
               },
             ),
           ],
@@ -741,141 +413,33 @@ class _MyTaskCard extends StatelessWidget {
       ),
     );
   }
-
-  _PriorityConfig _priorityConfig(String priority) {
-    switch (priority) {
-      case 'High':
-        return _PriorityConfig('Cao', const Color(0xFFEF4444));
-      case 'Medium':
-        return _PriorityConfig('Trung bình', const Color(0xFFF59E0B));
-      default:
-        return _PriorityConfig('Thấp', const Color(0xFF22C55E));
-    }
-  }
 }
 
-class _PriorityBadge extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _PriorityBadge({
-    required this.label,
-    required this.color,
-  });
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
-      ),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w900,
-          fontSize: 11,
-        ),
-      ),
-    );
-  }
-}
-
-class _SmallInfoChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-
-  const _SmallInfoChip({
-    required this.icon,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 8,
-        ),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF3F4F6),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 15,
-              color: const Color(0xFF6B7280),
-            ),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF6B7280),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyTaskList extends StatelessWidget {
-  const _EmptyTaskList();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(24),
       decoration: _cardDecoration(),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.assignment_late_outlined,
-            size: 46,
-            color: Color(0xFF9CA3AF),
+      child: const Center(
+        child: Text(
+          'Không có task nào phù hợp bộ lọc',
+          style: TextStyle(
+            color: Color(0xFF6B7280),
+            fontWeight: FontWeight.w800,
           ),
-          SizedBox(height: 10),
-          Text(
-            'Không có task nào phù hợp bộ lọc',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
-}
-
-class _PriorityConfig {
-  final String label;
-  final Color color;
-
-  _PriorityConfig(this.label, this.color);
 }
 
 BoxDecoration _cardDecoration() {
   return BoxDecoration(
     color: Colors.white,
-    borderRadius: BorderRadius.circular(26),
+    borderRadius: BorderRadius.circular(18),
     boxShadow: [
       BoxShadow(
         color: Colors.black.withOpacity(0.055),
@@ -884,80 +448,4 @@ BoxDecoration _cardDecoration() {
       ),
     ],
   );
-}
-
-class _ApprovalShortcutCard extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _ApprovalShortcutCard({
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(26),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.055),
-              blurRadius: 16,
-              offset: const Offset(0, 7),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEDE9FE),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: const Icon(
-                Icons.fact_check_rounded,
-                color: Color(0xFF7C3AED),
-              ),
-            ),
-            const SizedBox(width: 14),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Yêu cầu đã gửi',
-                    style: TextStyle(
-                      color: Color(0xFF111827),
-                      fontSize: 17,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  SizedBox(height: 5),
-                  Text(
-                    'Xem trạng thái các requirement bạn đã gửi duyệt',
-                    style: TextStyle(
-                      color: Color(0xFF6B7280),
-                      fontWeight: FontWeight.w600,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: Color(0xFF9CA3AF),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

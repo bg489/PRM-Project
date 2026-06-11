@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+
 import '../../data/mock_tasks.dart';
+import '../../services/app_data_service.dart';
 
 class CreateEditTaskScreen extends StatefulWidget {
   final String projectId;
@@ -16,15 +18,16 @@ class CreateEditTaskScreen extends StatefulWidget {
 }
 
 class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
-  final TextEditingController titleController = TextEditingController();
-  final TextEditingController descriptionController = TextEditingController();
-  final TextEditingController requirementController = TextEditingController();
-  final TextEditingController checklistController = TextEditingController();
+  final titleController = TextEditingController();
+  final descriptionController = TextEditingController();
+  final requirementController = TextEditingController();
+  final checklistController = TextEditingController();
 
   String selectedAssignee = 'Nguyễn Văn A';
   String selectedAssigneeAvatar = 'NA';
   String selectedPriority = 'Medium';
   DateTime selectedDate = DateTime.now().add(const Duration(days: 5));
+  bool isSaving = false;
 
   final List<String> requirements = [];
   final List<String> checklistItems = [];
@@ -36,7 +39,7 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
     _AssigneeOption(name: 'Hà Nhi', avatar: 'HN'),
   ];
 
-  final List<String> priorities = ['Low', 'Medium', 'High'];
+  final List<String> priorities = const ['Low', 'Medium', 'High'];
 
   bool get isEditMode => widget.existingTask != null;
 
@@ -45,23 +48,20 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
     super.initState();
 
     final task = widget.existingTask;
-
-    if (task != null) {
-      titleController.text = task.title;
-      descriptionController.text = task.description;
-      selectedAssignee = task.assigneeName;
-      selectedAssigneeAvatar = task.assigneeAvatar;
-      selectedPriority = task.priority;
-      checklistItems.addAll(
-        List.generate(
-          task.checklistTotal,
-              (index) => 'Checklist ${index + 1}',
-        ),
-      );
-    } else {
+    if (task == null) {
       requirements.add('Yêu cầu kỹ thuật từ quản lý');
       checklistItems.add('Kiểm tra giao diện mobile');
+      return;
     }
+
+    titleController.text = task.title;
+    descriptionController.text = task.description;
+    selectedAssignee = task.assigneeName;
+    selectedAssigneeAvatar = task.assigneeAvatar;
+    selectedPriority = task.priority;
+    checklistItems.addAll(
+      List.generate(task.checklistTotal, (index) => 'Checklist ${index + 1}'),
+    );
   }
 
   @override
@@ -75,7 +75,6 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
 
   void addRequirement() {
     final value = requirementController.text.trim();
-
     if (value.isEmpty) {
       showMessage('Vui lòng nhập yêu cầu kỹ thuật');
       return;
@@ -87,15 +86,8 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
     });
   }
 
-  void removeRequirement(int index) {
-    setState(() {
-      requirements.removeAt(index);
-    });
-  }
-
   void addChecklistItem() {
     final value = checklistController.text.trim();
-
     if (value.isEmpty) {
       showMessage('Vui lòng nhập checklist');
       return;
@@ -104,12 +96,6 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
     setState(() {
       checklistItems.add(value);
       checklistController.clear();
-    });
-  }
-
-  void removeChecklistItem(int index) {
-    setState(() {
-      checklistItems.removeAt(index);
     });
   }
 
@@ -128,7 +114,7 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
     });
   }
 
-  void saveTask() {
+  Future<void> saveTask() async {
     final title = titleController.text.trim();
     final description = descriptionController.text.trim();
 
@@ -137,25 +123,55 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
       return;
     }
 
-    final newTask = MockTask(
-      id: widget.existingTask?.id ??
-          't${DateTime.now().millisecondsSinceEpoch}',
-      projectId: widget.projectId,
-      title: title,
-      description: description.isEmpty
-          ? 'Chưa có mô tả cho công việc này.'
-          : description,
-      assigneeName: selectedAssignee,
-      assigneeAvatar: selectedAssigneeAvatar,
-      priority: selectedPriority,
-      status: widget.existingTask?.status ?? 'Cần làm',
-      dueDate: formatDate(selectedDate),
-      checklistDone: widget.existingTask?.checklistDone ?? 0,
-      checklistTotal: checklistItems.isEmpty ? 1 : checklistItems.length,
-      commentCount: widget.existingTask?.commentCount ?? 0,
-    );
+    setState(() {
+      isSaving = true;
+    });
 
-    Navigator.pop(context, newTask);
+    try {
+      final normalizedDescription =
+          description.isEmpty ? 'Chưa có mô tả cho công việc này.' : description;
+
+      final savedTask = isEditMode
+          ? await AppDataService.updateTask(
+              MockTask(
+                id: widget.existingTask!.id,
+                listId: widget.existingTask!.listId,
+                projectId: widget.projectId,
+                title: title,
+                description: normalizedDescription,
+                creatorId: widget.existingTask!.creatorId,
+                assigneeId: widget.existingTask!.assigneeId,
+                assigneeName: selectedAssignee,
+                assigneeAvatar: selectedAssigneeAvatar,
+                priority: selectedPriority,
+                status: widget.existingTask!.status,
+                dueDate: formatDate(selectedDate),
+                checklistDone: widget.existingTask!.checklistDone,
+                checklistTotal:
+                    checklistItems.isEmpty ? 1 : checklistItems.length,
+                commentCount: widget.existingTask!.commentCount,
+              ),
+            )
+          : await AppDataService.createTask(
+              projectId: widget.projectId,
+              title: title,
+              description: normalizedDescription,
+              assigneeName: selectedAssignee,
+              priority: selectedPriority,
+              dueDate: formatDate(selectedDate),
+              checklistItems: checklistItems,
+              requirements: requirements,
+            );
+
+      if (!mounted) return;
+      Navigator.pop(context, savedTask);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        isSaving = false;
+      });
+      showMessage('Không thể lưu task: $error');
+    }
   }
 
   String formatDate(DateTime date) {
@@ -175,307 +191,138 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final priorityConfig = getPriorityConfig(selectedPriority);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
+      appBar: AppBar(
+        title: Text(isEditMode ? 'Chỉnh sửa công việc' : 'Tạo công việc mới'),
+        backgroundColor: const Color(0xFF7C3AED),
+        foregroundColor: Colors.white,
+      ),
       body: SafeArea(
-        child: Column(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
           children: [
-            _CreateTaskHeader(
-              title: isEditMode ? 'Chỉnh sửa công việc' : 'Tạo công việc mới',
-              onBack: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _SectionCard(
-                      title: 'Thông tin công việc',
-                      icon: Icons.task_alt_rounded,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _FieldLabel(
-                            label: 'Tiêu đề',
-                            requiredField: true,
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: titleController,
-                            decoration: _inputDecoration(
-                              hintText: 'Nhập tiêu đề công việc',
-                              icon: Icons.title_rounded,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          _FieldLabel(label: 'Mô tả'),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: descriptionController,
-                            maxLines: 4,
-                            decoration: _inputDecoration(
-                              hintText: 'Nhập mô tả chi tiết',
-                              icon: Icons.description_outlined,
-                            ),
-                          ),
-                        ],
-                      ),
+            _SectionCard(
+              title: 'Thông tin công việc',
+              child: Column(
+                children: [
+                  TextField(
+                    controller: titleController,
+                    decoration: _inputDecoration(
+                      label: 'Tiêu đề',
+                      icon: Icons.title_rounded,
                     ),
-
-                    const SizedBox(height: 16),
-
-                    _SectionCard(
-                      title: 'Phân công & Deadline',
-                      icon: Icons.group_outlined,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _FieldLabel(label: 'Người xử lý'),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            value: selectedAssignee,
-                            decoration: _inputDecoration(
-                              hintText: 'Chọn thành viên',
-                              icon: Icons.person_outline_rounded,
-                            ),
-                            items: assignees.map((assignee) {
-                              return DropdownMenuItem(
-                                value: assignee.name,
-                                child: Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 14,
-                                      backgroundColor: const Color(0xFF6366F1),
-                                      child: Text(
-                                        assignee.avatar,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w900,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(assignee.name),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              if (value == null) return;
-
-                              final assignee = assignees.firstWhere(
-                                    (item) => item.name == value,
-                              );
-
-                              setState(() {
-                                selectedAssignee = assignee.name;
-                                selectedAssigneeAvatar = assignee.avatar;
-                              });
-                            },
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          _FieldLabel(label: 'Mức độ ưu tiên'),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            value: selectedPriority,
-                            decoration: _inputDecoration(
-                              hintText: 'Chọn độ ưu tiên',
-                              icon: Icons.flag_outlined,
-                            ),
-                            items: priorities.map((priority) {
-                              final config = getPriorityConfig(priority);
-
-                              return DropdownMenuItem(
-                                value: priority,
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        color: config.color,
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(config.label),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              if (value == null) return;
-
-                              setState(() {
-                                selectedPriority = value;
-                              });
-                            },
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          _FieldLabel(label: 'Ngày hạn chót'),
-                          const SizedBox(height: 8),
-                          InkWell(
-                            onTap: pickDueDate,
-                            borderRadius: BorderRadius.circular(16),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 15,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF3F4F6),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.calendar_today_outlined,
-                                    color: Color(0xFF6B7280),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    formatDate(selectedDate),
-                                    style: const TextStyle(
-                                      color: Color(0xFF111827),
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: priorityConfig.color.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      priorityConfig.label,
-                                      style: TextStyle(
-                                        color: priorityConfig.color,
-                                        fontWeight: FontWeight.w900,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: descriptionController,
+                    maxLines: 4,
+                    decoration: _inputDecoration(
+                      label: 'Mô tả',
+                      icon: Icons.description_outlined,
                     ),
-
-                    const SizedBox(height: 16),
-
-                    _SectionCard(
-                      title: 'Yêu cầu kỹ thuật từ Quản lý',
-                      icon: Icons.verified_user_outlined,
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: requirementController,
-                                  decoration: _inputDecoration(
-                                    hintText: 'Thêm yêu cầu kỹ thuật',
-                                    icon: Icons.rule_rounded,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              _AddButton(onTap: addRequirement),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          if (requirements.isEmpty)
-                            const _EmptyText(
-                              text: 'Chưa có yêu cầu kỹ thuật nào',
-                            )
-                          else
-                            ...List.generate(requirements.length, (index) {
-                              return _ListItemChip(
-                                title: requirements[index],
-                                index: index,
-                                onRemove: () => removeRequirement(index),
-                              );
-                            }),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    _SectionCard(
-                      title: 'Checklist',
-                      icon: Icons.checklist_rounded,
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: checklistController,
-                                  decoration: _inputDecoration(
-                                    hintText: 'Thêm checklist',
-                                    icon: Icons.add_task_rounded,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              _AddButton(onTap: addChecklistItem),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          if (checklistItems.isEmpty)
-                            const _EmptyText(
-                              text: 'Chưa có checklist nào',
-                            )
-                          else
-                            ...List.generate(checklistItems.length, (index) {
-                              return _ListItemChip(
-                                title: checklistItems[index],
-                                index: index,
-                                onRemove: () => removeChecklistItem(index),
-                              );
-                            }),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
+            ),
+            const SizedBox(height: 16),
+            _SectionCard(
+              title: 'Phân công & Deadline',
+              child: Column(
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: selectedAssignee,
+                    decoration: _inputDecoration(
+                      label: 'Người xử lý',
+                      icon: Icons.person_outline_rounded,
+                    ),
+                    items: assignees.map((assignee) {
+                      return DropdownMenuItem(
+                        value: assignee.name,
+                        child: Text('${assignee.name} (${assignee.avatar})'),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      final assignee =
+                          assignees.firstWhere((item) => item.name == value);
+                      setState(() {
+                        selectedAssignee = assignee.name;
+                        selectedAssigneeAvatar = assignee.avatar;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    value: selectedPriority,
+                    decoration: _inputDecoration(
+                      label: 'Mức độ ưu tiên',
+                      icon: Icons.flag_outlined,
+                    ),
+                    items: priorities.map((priority) {
+                      return DropdownMenuItem(
+                        value: priority,
+                        child: Text(_priorityLabel(priority)),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() {
+                        selectedPriority = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  ListTile(
+                    onTap: pickDueDate,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    tileColor: const Color(0xFFF3F4F6),
+                    leading: const Icon(Icons.calendar_today_outlined),
+                    title: Text('Hạn chót: ${formatDate(selectedDate)}'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            _EditableListSection(
+              title: 'Yêu cầu kỹ thuật từ quản lý',
+              controller: requirementController,
+              hint: 'Thêm yêu cầu kỹ thuật',
+              items: requirements,
+              onAdd: addRequirement,
+              onRemove: (index) {
+                setState(() {
+                  requirements.removeAt(index);
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+            _EditableListSection(
+              title: 'Checklist',
+              controller: checklistController,
+              hint: 'Thêm checklist',
+              items: checklistItems,
+              onAdd: addChecklistItem,
+              onRemove: (index) {
+                setState(() {
+                  checklistItems.removeAt(index);
+                });
+              },
             ),
           ],
         ),
       ),
       bottomSheet: Container(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 20,
-              offset: const Offset(0, -8),
-            ),
-          ],
-        ),
+        color: Colors.white,
         child: SizedBox(
           width: double.infinity,
           height: 54,
           child: ElevatedButton(
-            onPressed: saveTask,
+            onPressed: isSaving ? null : saveTask,
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF7C3AED),
               foregroundColor: Colors.white,
@@ -484,7 +331,11 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
               ),
             ),
             child: Text(
-              isEditMode ? 'Lưu chỉnh sửa' : 'Tạo mới công việc',
+              isSaving
+                  ? 'Đang lưu...'
+                  : isEditMode
+                      ? 'Lưu chỉnh sửa'
+                      : 'Tạo mới công việc',
               style: const TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 16,
@@ -497,11 +348,11 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
   }
 
   InputDecoration _inputDecoration({
-    required String hintText,
+    required String label,
     required IconData icon,
   }) {
     return InputDecoration(
-      hintText: hintText,
+      labelText: label,
       prefixIcon: Icon(icon),
       filled: true,
       fillColor: const Color(0xFFF3F4F6),
@@ -512,87 +363,24 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
     );
   }
 
-  _PriorityConfig getPriorityConfig(String priority) {
+  String _priorityLabel(String priority) {
     switch (priority) {
       case 'High':
-        return _PriorityConfig('Cao', const Color(0xFFEF4444));
+        return 'Cao';
       case 'Medium':
-        return _PriorityConfig('Trung bình', const Color(0xFFF59E0B));
+        return 'Trung bình';
       default:
-        return _PriorityConfig('Thấp', const Color(0xFF22C55E));
+        return 'Thấp';
     }
-  }
-}
-
-class _CreateTaskHeader extends StatelessWidget {
-  final String title;
-  final VoidCallback onBack;
-
-  const _CreateTaskHeader({
-    required this.title,
-    required this.onBack,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFF2563EB),
-            Color(0xFF9333EA),
-          ],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
-        ),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: onBack,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: Colors.white,
-                size: 19,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
 class _SectionCard extends StatelessWidget {
   final String title;
-  final IconData icon;
   final Widget child;
 
   const _SectionCard({
     required this.title,
-    required this.icon,
     required this.child,
   });
 
@@ -602,7 +390,7 @@ class _SectionCard extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.06),
@@ -614,24 +402,13 @@ class _SectionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                icon,
-                color: const Color(0xFF7C3AED),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: Color(0xFF111827),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
+          Text(
+            title,
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
           ),
           const SizedBox(height: 14),
           child,
@@ -641,162 +418,78 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
-class _FieldLabel extends StatelessWidget {
-  final String label;
-  final bool requiredField;
-
-  const _FieldLabel({
-    required this.label,
-    this.requiredField = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: Color(0xFF374151),
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        if (requiredField)
-          const Text(
-            ' *',
-            style: TextStyle(
-              color: Color(0xFFEF4444),
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _AddButton extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _AddButton({
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        width: 50,
-        height: 50,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [
-              Color(0xFF2563EB),
-              Color(0xFF9333EA),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Icon(
-          Icons.add_rounded,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-}
-
-class _ListItemChip extends StatelessWidget {
+class _EditableListSection extends StatelessWidget {
   final String title;
-  final int index;
-  final VoidCallback onRemove;
+  final TextEditingController controller;
+  final String hint;
+  final List<String> items;
+  final VoidCallback onAdd;
+  final ValueChanged<int> onRemove;
 
-  const _ListItemChip({
+  const _EditableListSection({
     required this.title,
-    required this.index,
+    required this.controller,
+    required this.hint,
+    required this.items,
+    required this.onAdd,
     required this.onRemove,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: const Color(0xFFE5E7EB),
-        ),
-      ),
-      child: Row(
+    return _SectionCard(
+      title: title,
+      child: Column(
         children: [
-          Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEDE9FE),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Center(
-              child: Text(
-                '${index + 1}',
-                style: const TextStyle(
-                  color: Color(0xFF7C3AED),
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    hintText: hint,
+                    filled: true,
+                    fillColor: const Color(0xFFF3F4F6),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: Color(0xFF374151),
-                fontWeight: FontWeight.w700,
-                height: 1.35,
+              const SizedBox(width: 10),
+              IconButton.filled(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add_rounded),
               ),
-            ),
+            ],
           ),
-          IconButton(
-            onPressed: onRemove,
-            icon: const Icon(
-              Icons.close_rounded,
-              color: Color(0xFFEF4444),
-            ),
-          ),
+          const SizedBox(height: 12),
+          if (items.isEmpty)
+            const Text(
+              'Chưa có dữ liệu',
+              style: TextStyle(
+                color: Color(0xFF9CA3AF),
+                fontWeight: FontWeight.w600,
+              ),
+            )
+          else
+            ...List.generate(items.length, (index) {
+              return ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  radius: 14,
+                  child: Text('${index + 1}'),
+                ),
+                title: Text(items[index]),
+                trailing: IconButton(
+                  onPressed: () => onRemove(index),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              );
+            }),
         ],
-      ),
-    );
-  }
-}
-
-class _EmptyText extends StatelessWidget {
-  final String text;
-
-  const _EmptyText({
-    required this.text,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Color(0xFF9CA3AF),
-          fontWeight: FontWeight.w600,
-        ),
       ),
     );
   }
@@ -810,11 +503,4 @@ class _AssigneeOption {
     required this.name,
     required this.avatar,
   });
-}
-
-class _PriorityConfig {
-  final String label;
-  final Color color;
-
-  _PriorityConfig(this.label, this.color);
 }

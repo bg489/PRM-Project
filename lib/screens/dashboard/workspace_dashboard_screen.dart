@@ -11,6 +11,7 @@ import '../profile/profile_settings_screen.dart';
 import '../user/my_tasks_screen.dart';
 import '../../utils/role_permissions.dart';
 import '../user/user_notifications_screen.dart';
+import '../../services/app_data_service.dart';
 
 class WorkspaceDashboardScreen extends StatefulWidget {
   final MockUser user;
@@ -29,10 +30,40 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
   int selectedWorkspaceIndex = 0;
   List<MockWorkspace> workspaces = List.from(mockWorkspaces);
   List<MockProject> allProjects = List.from(mockProjects);
+  bool isLoading = true;
+  String? errorMessage;
+
   @override
   void initState() {
     super.initState();
-    workspaces = List.from(mockWorkspaces);
+    loadDashboard();
+  }
+
+  Future<void> loadDashboard() async {
+    try {
+      final fetchedWorkspaces = await AppDataService.fetchWorkspaces();
+      final fetchedProjects = await AppDataService.fetchProjects();
+
+      if (!mounted) return;
+
+      setState(() {
+        workspaces = fetchedWorkspaces;
+        allProjects = fetchedProjects;
+        selectedWorkspaceIndex = selectedWorkspaceIndex.clamp(
+          0,
+          workspaces.isEmpty ? 0 : workspaces.length - 1,
+        ).toInt();
+        isLoading = false;
+        errorMessage = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        isLoading = false;
+        errorMessage = error.toString();
+      });
+    }
   }
 
   Future<void> openCreateWorkspaceScreen() async {
@@ -45,10 +76,21 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
 
     if (newWorkspace == null) return;
 
-    setState(() {
-      workspaces.add(newWorkspace);
-      selectedWorkspaceIndex = workspaces.length - 1;
-    });
+    try {
+      final savedWorkspace = await AppDataService.createWorkspace(
+        name: newWorkspace.name,
+        description: newWorkspace.description,
+        iconText: newWorkspace.iconText,
+      );
+
+      setState(() {
+        workspaces.add(savedWorkspace);
+        selectedWorkspaceIndex = workspaces.length - 1;
+      });
+    } catch (error) {
+      showMessage('Không thể tạo workspace: $error');
+      return;
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -73,9 +115,22 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
 
     if (newProject == null) return;
 
-    setState(() {
-      allProjects.add(newProject);
-    });
+    try {
+      final savedProject = await AppDataService.createProject(
+        workspaceId: selectedWorkspace.id,
+        name: newProject.name,
+        code: newProject.code,
+        description: newProject.description,
+        deadline: newProject.deadline,
+      );
+
+      setState(() {
+        allProjects.add(savedProject);
+      });
+    } catch (error) {
+      showMessage('Không thể tạo dự án: $error');
+      return;
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -177,8 +232,59 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
     );
   }
 
+  Future<List<MockTask>> loadProjectTasks(String projectId) async {
+    try {
+      return await AppDataService.fetchTasks(projectId: projectId);
+    } catch (_) {
+      return getTasksByProject(projectId);
+    }
+  }
+
+  void showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F7FB),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (workspaces.isEmpty) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF5F7FB),
+        floatingActionButton: RolePermissions.canCreateWorkspace(widget.user)
+            ? FloatingActionButton(
+                onPressed: openCreateMenu,
+                backgroundColor: const Color(0xFF7C3AED),
+                foregroundColor: Colors.white,
+                child: const Icon(Icons.add_rounded, size: 30),
+              )
+            : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              errorMessage ?? 'Chưa có workspace nào trong hệ thống.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final selectedWorkspace = workspaces[selectedWorkspaceIndex];
     final workspaceProjects = allProjects
         .where((project) => project.workspaceId == selectedWorkspace.id)
@@ -216,7 +322,7 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
             ),
           );
         },
-        onCalendarTap: () {
+        onCalendarTap: () async {
           if (workspaceProjects.isEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -228,7 +334,8 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
           }
 
           final project = workspaceProjects.first;
-          final tasks = getTasksByProject(project.id);
+          final tasks = await loadProjectTasks(project.id);
+          if (!context.mounted) return;
 
           Navigator.push(
             context,
@@ -241,7 +348,7 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
             ),
           );
         },
-        onAnalyticsTap: () {
+        onAnalyticsTap: () async {
           if (workspaceProjects.isEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -253,7 +360,8 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
           }
 
           final project = workspaceProjects.first;
-          final tasks = getTasksByProject(project.id);
+          final tasks = await loadProjectTasks(project.id);
+          if (!context.mounted) return;
 
           Navigator.push(
             context,
@@ -266,7 +374,7 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
             ),
           );
         },
-        onProfileTap: () {
+        onProfileTap: () async {
           if (workspaceProjects.isEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -278,7 +386,8 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
           }
 
           final project = workspaceProjects.first;
-          final tasks = getTasksByProject(project.id);
+          final tasks = await loadProjectTasks(project.id);
+          if (!context.mounted) return;
 
           Navigator.push(
             context,

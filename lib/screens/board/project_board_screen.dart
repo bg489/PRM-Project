@@ -11,6 +11,7 @@ import 'board_configuration_screen.dart';
 import '../approval/requirements_approval_screen.dart';
 import '../../utils/app_navigation.dart';
 import '../../utils/role_permissions.dart';
+import '../../services/app_data_service.dart';
 
 class ProjectBoardScreen extends StatefulWidget {
   final MockProject project;
@@ -28,14 +29,54 @@ class ProjectBoardScreen extends StatefulWidget {
 
 class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
   late List<MockTask> tasks;
+  late List<String> boardColumns;
+  bool isLoading = true;
+  int waitingApprovalCount = 0;
 
   @override
   void initState() {
     super.initState();
-    tasks = getTasksByProject(widget.project.id);
+    tasks = const [];
+    boardColumns = List<String>.from(kanbanColumns);
+    loadTasks();
   }
 
-  void moveTaskToColumn(MockTask task, String newStatus) {
+  Future<void> loadTasks() async {
+    try {
+      final fetchedLists = await AppDataService.fetchTaskLists(widget.project.id);
+      final fetchedTasks = await AppDataService.fetchTasks(
+        projectId: widget.project.id,
+      );
+      final approvalRequests = await AppDataService.fetchApprovalRequests(
+        projectId: widget.project.id,
+        status: 'WAITING',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        tasks = fetchedTasks;
+        boardColumns = fetchedLists.isEmpty
+            ? List<String>.from(kanbanColumns)
+            : fetchedLists.map((list) => list.name).toList();
+        waitingApprovalCount = approvalRequests.length;
+        isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        tasks = getTasksByProject(widget.project.id);
+        boardColumns = List<String>.from(kanbanColumns);
+        waitingApprovalCount = 0;
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> moveTaskToColumn(MockTask task, String newStatus) async {
+    final previousTasks = List<MockTask>.from(tasks);
+
     setState(() {
       tasks = tasks.map((item) {
         if (item.id == task.id) {
@@ -52,6 +93,34 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
         duration: const Duration(milliseconds: 900),
       ),
     );
+
+    try {
+      final updatedTask = await AppDataService.updateTaskStatus(
+        taskId: task.id,
+        status: newStatus,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        tasks = tasks.map((item) {
+          return item.id == updatedTask.id ? updatedTask : item;
+        }).toList();
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        tasks = previousTasks;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Không thể cập nhật trạng thái: $error'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void openTaskDetail(MockTask task) {
@@ -126,7 +195,7 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
           tasks: tasks,
         ),
       ),
-    );
+    ).then((_) => loadTasks());
   }
 
   void openRequirementsApprovalScreen() {
@@ -143,8 +212,16 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F7FB),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final totalTasks = tasks.length;
-    final doneTasks = tasks.where((task) => task.status == 'Đã xong').length;
+    final doneColumn = boardColumns.isEmpty ? kanbanColumns.last : boardColumns.last;
+    final doneTasks = tasks.where((task) => task.status == doneColumn).length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
@@ -174,6 +251,7 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
               onApprovalTap: openRequirementsApprovalScreen,
               canConfigureBoard: RolePermissions.canManageBoard(widget.user),
               canApproveRequirements: RolePermissions.canApproveRequirements(widget.user),
+              approvalCount: waitingApprovalCount,
             ),
             const SizedBox(height: 16),
 
@@ -228,10 +306,10 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 90),
-                itemCount: kanbanColumns.length,
+                itemCount: boardColumns.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 16),
                 itemBuilder: (context, index) {
-                  final columnName = kanbanColumns[index];
+                  final columnName = boardColumns[index];
                   final columnTasks =
                   tasks.where((task) => task.status == columnName).toList();
 
@@ -341,6 +419,7 @@ class _BoardHeader extends StatelessWidget {
   final VoidCallback onApprovalTap;
   final bool canConfigureBoard;
   final bool canApproveRequirements;
+  final int approvalCount;
 
   const _BoardHeader({
     required this.projectName,
@@ -352,6 +431,7 @@ class _BoardHeader extends StatelessWidget {
     required this.onApprovalTap,
     required this.canConfigureBoard,
     required this.canApproveRequirements,
+    required this.approvalCount,
   });
 
   @override
@@ -437,28 +517,29 @@ class _BoardHeader extends StatelessWidget {
                           color: Colors.white,
                         ),
                       ),
-                      Positioned(
-                        top: -6,
-                        right: -6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF97316),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const Text(
-                            '3',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w900,
+                      if (approvalCount > 0)
+                        Positioned(
+                          top: -6,
+                          right: -6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF97316),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              '$approvalCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),

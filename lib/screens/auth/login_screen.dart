@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../../data/mock_users.dart';
 import '../dashboard/workspace_dashboard_screen.dart';
 import '../admin/admin_dashboard_screen.dart';
+import '../../services/app_data_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -40,35 +40,43 @@ class _LoginScreenState extends State<LoginScreen> {
       isLoading = true;
     });
 
-    await Future.delayed(const Duration(milliseconds: 800));
+    try {
+      final user = await AppDataService.login(
+        email: email,
+        password: password,
+      );
 
-    final user = mockLogin(email, password);
+      if (!mounted) return;
 
-    setState(() {
-      isLoading = false;
-    });
+      setState(() {
+        isLoading = false;
+      });
 
-    if (user == null) {
-      showMessage('Email hoặc mật khẩu không chính xác');
-      return;
-    }
+      if (user.role == 'Admin') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AdminDashboardScreen(admin: user),
+          ),
+        );
+        return;
+      }
 
-    if (user.role == 'Admin') {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => AdminDashboardScreen(admin: user),
+          builder: (_) => WorkspaceDashboardScreen(user: user),
         ),
       );
-      return;
-    }
+    } catch (_) {
+      if (!mounted) return;
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => WorkspaceDashboardScreen(user: user),
-      ),
-    );
+      setState(() {
+        isLoading = false;
+      });
+
+      showMessage('Email hoặc mật khẩu không chính xác');
+    }
   }
 
   void showMessage(String message) {

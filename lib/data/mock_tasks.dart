@@ -1,48 +1,106 @@
 class MockTask {
   final String id;
+  final String? listId;
   final String projectId;
   final String title;
   final String description;
+  final String? creatorId;
+  final String? assigneeId;
   final String assigneeName;
   final String assigneeAvatar;
   final String priority;
   final String status;
   final String dueDate;
+  final String dueDateFull;
   final int checklistDone;
   final int checklistTotal;
   final int commentCount;
 
   const MockTask({
     required this.id,
+    this.listId,
     required this.projectId,
     required this.title,
     required this.description,
+    this.creatorId,
+    this.assigneeId,
     required this.assigneeName,
     required this.assigneeAvatar,
     required this.priority,
     required this.status,
     required this.dueDate,
+    this.dueDateFull = '',
     required this.checklistDone,
     required this.checklistTotal,
     required this.commentCount,
   });
 
+  factory MockTask.fromJson(Map<String, dynamic> json) {
+    return MockTask(
+      id: json['id']?.toString() ?? '',
+      listId: json['listId']?.toString(),
+      projectId: json['projectId']?.toString() ??
+          json['project_id']?.toString() ??
+          '',
+      title: json['title']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      creatorId: json['creatorId']?.toString(),
+      assigneeId: json['assigneeId']?.toString(),
+      assigneeName: json['assigneeName']?.toString() ?? 'Chưa phân công',
+      assigneeAvatar: json['assigneeAvatar']?.toString() ?? 'NA',
+      priority: json['priority']?.toString() ?? 'Medium',
+      status: json['status']?.toString() ?? 'Cần làm',
+      dueDate: json['dueDate']?.toString() ?? '',
+      dueDateFull: json['dueDateFull']?.toString() ?? '',
+      checklistDone: (json['checklistDone'] as num?)?.toInt() ?? 0,
+      checklistTotal: (json['checklistTotal'] as num?)?.toInt() ?? 0,
+      commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'listId': listId,
+      'projectId': projectId,
+      'title': title,
+      'description': description,
+      'creatorId': creatorId,
+      'assigneeId': assigneeId,
+      'assigneeName': assigneeName,
+      'assigneeAvatar': assigneeAvatar,
+      'priority': priority,
+      'status': status,
+      'dueDate': dueDateFull.isNotEmpty ? dueDateFull : dueDate,
+      'checklistDone': checklistDone,
+      'checklistTotal': checklistTotal,
+      'commentCount': commentCount,
+    };
+  }
+
   MockTask copyWith({
     String? status,
+    int? checklistDone,
+    int? checklistTotal,
+    int? commentCount,
   }) {
     return MockTask(
       id: id,
+      listId: listId,
       projectId: projectId,
       title: title,
       description: description,
+      creatorId: creatorId,
+      assigneeId: assigneeId,
       assigneeName: assigneeName,
       assigneeAvatar: assigneeAvatar,
       priority: priority,
       status: status ?? this.status,
       dueDate: dueDate,
-      checklistDone: checklistDone,
-      checklistTotal: checklistTotal,
-      commentCount: commentCount,
+      dueDateFull: dueDateFull,
+      checklistDone: checklistDone ?? this.checklistDone,
+      checklistTotal: checklistTotal ?? this.checklistTotal,
+      commentCount: commentCount ?? this.commentCount,
     );
   }
 }
@@ -59,7 +117,7 @@ const List<MockTask> mockTasks = [
     id: 't001',
     projectId: 'p001',
     title: 'Thiết kế màn hình đăng nhập',
-    description: 'Tạo UI login, validation và xử lý mock login.',
+    description: 'Tạo UI login, validation và xử lý đăng nhập qua REST API.',
     assigneeName: 'Lê Thị C',
     assigneeAvatar: 'LC',
     priority: 'High',
@@ -142,8 +200,8 @@ const List<MockTask> mockTasks = [
   MockTask(
     id: 't007',
     projectId: 'p002',
-    title: 'Tạo API mock CRM',
-    description: 'Chuẩn bị dữ liệu giả cho CRM integration.',
+    title: 'Tạo API CRM',
+    description: 'Chuẩn bị dữ liệu và endpoint cho CRM integration.',
     assigneeName: 'Nguyễn Văn A',
     assigneeAvatar: 'NA',
     priority: 'High',
