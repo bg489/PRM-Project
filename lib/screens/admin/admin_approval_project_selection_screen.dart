@@ -95,7 +95,24 @@ class _AdminApprovalProjectSelectionScreenState
 
   @override
   Widget build(BuildContext context) {
-    final visibleProjects = filteredProjects;
+    final workspaceById = <String, MockWorkspace>{};
+
+    for (final workspace in workspaces) {
+      workspaceById[workspace.id] = workspace;
+    }
+
+    final workspaceList = workspaceById.values.toList();
+
+    final safeWorkspaceFilter =
+    selectedWorkspaceFilter == 'all' ||
+        workspaceById.containsKey(selectedWorkspaceFilter)
+        ? selectedWorkspaceFilter
+        : 'all';
+
+    final visibleProjects = projects.where((project) {
+      return safeWorkspaceFilter == 'all' ||
+          project.workspaceId == safeWorkspaceFilter;
+    }).toList();
 
     return AdminScreenScaffold(
       title: 'Chọn Project duyệt',
@@ -150,18 +167,18 @@ class _AdminApprovalProjectSelectionScreenState
                     const SizedBox(height: 18),
                     AdminCard(
                       child: DropdownButtonFormField<String>(
-                        value: selectedWorkspaceFilter,
+                        value: safeWorkspaceFilter,
                         decoration: adminInputDecoration(
                           label: 'Lọc theo Workspace',
                           icon: Icons.workspaces_outline,
                         ),
                         items: [
-                          const DropdownMenuItem(
+                          const DropdownMenuItem<String>(
                             value: 'all',
                             child: Text('Tất cả Workspace'),
                           ),
-                          ...workspaces.map((workspace) {
-                            return DropdownMenuItem(
+                          ...workspaceList.map((workspace) {
+                            return DropdownMenuItem<String>(
                               value: workspace.id,
                               child: Text(workspace.name),
                             );

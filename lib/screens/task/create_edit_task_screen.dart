@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import '../../data/mock_users.dart';
 import '../../data/mock_tasks.dart';
 import '../../services/app_data_service.dart';
 
@@ -23,21 +23,17 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
   final requirementController = TextEditingController();
   final checklistController = TextEditingController();
 
+  String? selectedAssigneeId;
   String selectedAssignee = 'Nguyễn Văn A';
   String selectedAssigneeAvatar = 'NA';
+  bool isLoadingUsers = true;
+  List<MockUser> assignees = [];
   String selectedPriority = 'Medium';
   DateTime selectedDate = DateTime.now().add(const Duration(days: 5));
   bool isSaving = false;
 
   final List<String> requirements = [];
   final List<String> checklistItems = [];
-
-  final List<_AssigneeOption> assignees = [
-    _AssigneeOption(name: 'Nguyễn Văn A', avatar: 'NA'),
-    _AssigneeOption(name: 'Trần Minh', avatar: 'TM'),
-    _AssigneeOption(name: 'Lê Thị C', avatar: 'LC'),
-    _AssigneeOption(name: 'Hà Nhi', avatar: 'HN'),
-  ];
 
   final List<String> priorities = const ['Low', 'Medium', 'High'];
 
@@ -46,6 +42,7 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
   @override
   void initState() {
     super.initState();
+    loadAssignees();
 
     final task = widget.existingTask;
     if (task == null) {
@@ -62,6 +59,55 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
     checklistItems.addAll(
       List.generate(task.checklistTotal, (index) => 'Checklist ${index + 1}'),
     );
+  }
+
+  Future<void> loadAssignees() async {
+    try {
+      final users = await AppDataService.fetchUsers();
+      final activeUsers = users
+          .where((user) => user.isActive && user.role != 'Admin')
+          .toList();
+
+      if (!mounted) return;
+
+      setState(() {
+        assignees = activeUsers;
+
+        if (assignees.isNotEmpty) {
+          final currentUser = selectedAssigneeId == null
+              ? assignees.first
+              : assignees.firstWhere(
+                (user) => user.id == selectedAssigneeId,
+            orElse: () => assignees.first,
+          );
+
+          selectedAssigneeId = currentUser.id;
+          selectedAssignee = currentUser.fullName;
+          selectedAssigneeAvatar = currentUser.avatarText;
+        }
+
+        isLoadingUsers = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      final fallbackUsers = mockUsers
+          .where((user) => user.isActive && user.role != 'Admin')
+          .toList();
+
+      setState(() {
+        assignees = fallbackUsers;
+
+        if (assignees.isNotEmpty) {
+          final currentUser = assignees.first;
+          selectedAssigneeId = currentUser.id;
+          selectedAssignee = currentUser.fullName;
+          selectedAssigneeAvatar = currentUser.avatarText;
+        }
+
+        isLoadingUsers = false;
+      });
+    }
   }
 
   @override
@@ -123,6 +169,11 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
       return;
     }
 
+    if (selectedAssigneeId == null || selectedAssigneeId!.isEmpty) {
+      showMessage('Vui lòng chọn người xử lý');
+      return;
+    }
+
     setState(() {
       isSaving = true;
     });
@@ -140,7 +191,7 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
                 title: title,
                 description: normalizedDescription,
                 creatorId: widget.existingTask!.creatorId,
-                assigneeId: widget.existingTask!.assigneeId,
+                assigneeId: selectedAssigneeId,
                 assigneeName: selectedAssignee,
                 assigneeAvatar: selectedAssigneeAvatar,
                 priority: selectedPriority,
@@ -153,14 +204,15 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
               ),
             )
           : await AppDataService.createTask(
-              projectId: widget.projectId,
-              title: title,
-              description: normalizedDescription,
-              assigneeName: selectedAssignee,
-              priority: selectedPriority,
-              dueDate: formatDate(selectedDate),
-              checklistItems: checklistItems,
-              requirements: requirements,
+            projectId: widget.projectId,
+            title: title,
+            description: normalizedDescription,
+            assigneeId: selectedAssigneeId!,
+            assigneeName: selectedAssignee,
+            priority: selectedPriority,
+            dueDate: formatDate(selectedDate),
+            checklistItems: checklistItems,
+            requirements: requirements,
             );
 
       if (!mounted) return;
@@ -230,25 +282,31 @@ class _CreateEditTaskScreenState extends State<CreateEditTaskScreen> {
               title: 'Phân công & Deadline',
               child: Column(
                 children: [
-                  DropdownButtonFormField<String>(
-                    value: selectedAssignee,
+                  isLoadingUsers
+                      ? const LinearProgressIndicator()
+                      : DropdownButtonFormField<String>(
+                    value: selectedAssigneeId,
                     decoration: _inputDecoration(
                       label: 'Người xử lý',
                       icon: Icons.person_outline_rounded,
                     ),
-                    items: assignees.map((assignee) {
+                    items: assignees.map((user) {
                       return DropdownMenuItem(
-                        value: assignee.name,
-                        child: Text('${assignee.name} (${assignee.avatar})'),
+                        value: user.id,
+                        child: Text('${user.fullName} (${user.avatarText})'),
                       );
                     }).toList(),
                     onChanged: (value) {
                       if (value == null) return;
-                      final assignee =
-                          assignees.firstWhere((item) => item.name == value);
+
+                      final assignee = assignees.firstWhere(
+                            (user) => user.id == value,
+                      );
+
                       setState(() {
-                        selectedAssignee = assignee.name;
-                        selectedAssigneeAvatar = assignee.avatar;
+                        selectedAssigneeId = assignee.id;
+                        selectedAssignee = assignee.fullName;
+                        selectedAssigneeAvatar = assignee.avatarText;
                       });
                     },
                   ),

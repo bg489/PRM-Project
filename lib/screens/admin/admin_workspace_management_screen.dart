@@ -172,18 +172,16 @@ class _AdminWorkspaceManagementScreenState
                                           );
 
                                     if (!mounted) return;
-                                    setState(() {
-                                      if (isEditMode) {
-                                        final index = workspaces.indexWhere(
-                                          (item) => item.id == savedWorkspace.id,
-                                        );
-                                        if (index != -1) {
-                                          workspaces[index] = savedWorkspace;
-                                        }
-                                      } else {
-                                        workspaces.add(savedWorkspace);
-                                      }
-                                    });
+
+                                    Navigator.pop(bottomSheetContext);
+
+                                    await loadData();
+
+                                    if (!mounted) return;
+                                    showAdminMessage(
+                                      context,
+                                      isEditMode ? 'Đã cập nhật workspace' : 'Đã tạo workspace mới',
+                                    );
 
                                     Navigator.pop(bottomSheetContext);
                                     showAdminMessage(

@@ -253,6 +253,7 @@ class AppDataService {
     required String name,
     required String description,
     required String iconText,
+    List<String> memberIds = const [],
   }) async {
     final json = await apiClient.post(
       '/workspaces',
@@ -260,6 +261,7 @@ class AppDataService {
         'name': name,
         'description': description,
         'iconText': iconText,
+        'memberIds': memberIds,
       },
     );
     return MockWorkspace.fromJson(json as Map<String, dynamic>);
@@ -291,6 +293,7 @@ class AppDataService {
     required String code,
     required String description,
     required String deadline,
+    List<String> memberIds = const [],
   }) async {
     final json = await apiClient.post(
       '/projects',
@@ -300,6 +303,7 @@ class AppDataService {
         'code': code,
         'description': description,
         'deadline': deadline,
+        'memberIds': memberIds,
       },
     );
     return MockProject.fromJson(json as Map<String, dynamic>);
@@ -381,6 +385,7 @@ class AppDataService {
     required String projectId,
     required String title,
     required String description,
+    required String assigneeId,
     required String assigneeName,
     required String priority,
     required String dueDate,
@@ -393,6 +398,7 @@ class AppDataService {
         'projectId': projectId,
         'title': title,
         'description': description,
+        'assigneeId': assigneeId,
         'assigneeName': assigneeName,
         'priority': priority,
         'dueDate': dueDate,

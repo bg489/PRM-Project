@@ -189,7 +189,7 @@ app.get('/api/workspaces', asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/workspaces', asyncHandler(async (req, res) => {
-  const { name, description, iconText } = req.body;
+  const { name, description, iconText, memberIds = [] } = req.body;
   if (!name) throw httpError(400, 'Workspace name is required.');
 
   const workspaceId = makeId('ws');
@@ -205,6 +205,12 @@ app.post('/api/workspaces', asyncHandler(async (req, res) => {
      VALUES (?, ?, 'Owner')`,
     [workspaceId, req.user.id],
   );
+
+  const workspaceUsers = Array.isArray(memberIds) && memberIds.length > 0
+    ? await getUsersByIds([req.user.id, ...memberIds])
+    : await getAllActiveUsers();
+
+  await ensureWorkspaceMembers(workspaceId, workspaceUsers, req.user.id);
 
   await insertActivity({
     workspaceId,
@@ -266,13 +272,20 @@ app.post('/api/projects', asyncHandler(async (req, res) => {
     [projectId, workspaceId, name.trim(), description || '', code.trim().toUpperCase(), toSqlDate(deadline)],
   );
 
-  const uniqueMembers = [...new Set([req.user.id, ...memberIds])];
-  for (const memberId of uniqueMembers) {
-    await execute(
-      'INSERT IGNORE INTO project_members (project_id, user_id) VALUES (?, ?)',
-      [projectId, memberId],
-    );
+  const projectUsers = Array.isArray(memberIds) && memberIds.length > 0
+    ? await getUsersByIds([req.user.id, ...memberIds])
+    : await getWorkspaceMemberUsers(workspaceId);
+
+  const creatorExists = projectUsers.some((user) => user.id === req.user.id);
+  if (!creatorExists) {
+    projectUsers.push({
+      id: req.user.id,
+      role: req.user.role,
+    });
   }
+
+  await ensureWorkspaceMembers(workspaceId, projectUsers);
+  await ensureProjectMembers(projectId, projectUsers);
 
   await createDefaultLists(projectId);
   await insertActivity({
@@ -436,8 +449,16 @@ app.post('/api/tasks', asyncHandler(async (req, res) => {
     [taskId, listId, projectId, title.trim(), description || '', req.user.id, assignee?.id || null, priority, toSqlDate(dueDate)],
   );
 
+  const project = await getProjectById(projectId);
+
   if (assignee) {
-    await execute('INSERT IGNORE INTO project_members (project_id, user_id) VALUES (?, ?)', [projectId, assignee.id]);
+    await execute(
+      'INSERT IGNORE INTO project_members (project_id, user_id) VALUES (?, ?)',
+      [projectId, assignee.id],
+    );
+
+    await ensureWorkspaceMembers(project.workspaceId, [assignee]);
+
     await createNotification({
       targetUserId: assignee.id,
       title: 'Bạn được giao task mới',
@@ -464,7 +485,7 @@ app.post('/api/tasks', asyncHandler(async (req, res) => {
     );
   }
 
-  const project = await getProjectById(projectId);
+
   await insertActivity({
     workspaceId: project.workspaceId,
     userId: req.user.id,
@@ -827,7 +848,7 @@ function verifyToken(token) {
   const expectedBuffer = Buffer.from(expected);
   const signatureBuffer = Buffer.from(signature);
   if (expectedBuffer.length !== signatureBuffer.length ||
-      !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) {
+    !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) {
     throw httpError(401, 'Invalid token signature.');
   }
 
@@ -923,6 +944,69 @@ async function getLatestApprovalByRequirementId(requirementId) {
     [requirementId],
   );
   return rows.length ? mapApprovalRequest(rows[0]) : null;
+}
+
+async function getAllActiveUsers() {
+  return query(
+    `SELECT id, role
+     FROM users
+     WHERE is_active = TRUE`,
+  );
+}
+
+async function getUsersByIds(ids) {
+  const uniqueIds = [...new Set((ids || []).filter(Boolean).map(String))];
+
+  if (uniqueIds.length === 0) return [];
+
+  const placeholders = uniqueIds.map(() => '?').join(',');
+
+  return query(
+    `SELECT id, role
+     FROM users
+     WHERE is_active = TRUE AND id IN (${placeholders})`,
+    uniqueIds,
+  );
+}
+
+async function getWorkspaceMemberUsers(workspaceId) {
+  return query(
+    `SELECT u.id, u.role
+     FROM workspace_members wm
+     JOIN users u ON u.id = wm.user_id
+     WHERE wm.workspace_id = ? AND u.is_active = TRUE`,
+    [workspaceId],
+  );
+}
+
+function workspaceMemberRole(user, isOwner = false) {
+  if (isOwner) return 'Owner';
+  if (user.role === 'Admin' || user.role === 'Manager') return 'Manager';
+  return 'Member';
+}
+
+async function ensureWorkspaceMembers(workspaceId, users, ownerId = null) {
+  for (const user of users) {
+    await execute(
+      `INSERT IGNORE INTO workspace_members (workspace_id, user_id, member_role)
+       VALUES (?, ?, ?)`,
+      [
+        workspaceId,
+        user.id,
+        workspaceMemberRole(user, ownerId === user.id),
+      ],
+    );
+  }
+}
+
+async function ensureProjectMembers(projectId, users) {
+  for (const user of users) {
+    await execute(
+      `INSERT IGNORE INTO project_members (project_id, user_id)
+       VALUES (?, ?)`,
+      [projectId, user.id],
+    );
+  }
 }
 
 async function createDefaultLists(projectId) {
