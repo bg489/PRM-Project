@@ -46,23 +46,77 @@ app.get('/api/health', asyncHandler(async (_req, res) => {
 }));
 
 app.post('/api/auth/register', asyncHandler(async (req, res) => {
-  const { email, password, fullName, role = 'Member', avatarText } = req.body;
+  const { email, password, fullName, avatarText } = req.body;
 
   if (!email || !password || !fullName) {
     throw httpError(400, 'Email, password and fullName are required.');
   }
 
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedEmail.includes('@')) {
+    throw httpError(400, 'Email is invalid.');
+  }
+
+  if (String(password).length < 6) {
+    throw httpError(400, 'Password must contain at least 6 characters.');
+  }
+
+  const existingUsers = await query(
+    'SELECT id FROM users WHERE email = ? LIMIT 1',
+    [normalizedEmail],
+  );
+
+  if (existingUsers.length > 0) {
+    throw httpError(409, 'Email already exists.');
+  }
+
   const userId = makeId('u');
-  const safeAvatar = (avatarText || initials(fullName)).slice(0, 2).toUpperCase();
+  const role = 'Member';
+  const safeAvatar = (avatarText || initials(fullName))
+    .slice(0, 2)
+    .toUpperCase();
 
   await execute(
     `INSERT INTO users (id, email, password_hash, full_name, role, avatar_text)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [userId, email.trim().toLowerCase(), hashPassword(password), fullName.trim(), role, safeAvatar],
+    [
+      userId,
+      normalizedEmail,
+      hashPassword(password),
+      fullName.trim(),
+      role,
+      safeAvatar,
+    ],
   );
 
   const user = await getUserById(userId);
   const token = signToken({ sub: user.id, role: user.role });
+
+  await execute(
+    `INSERT IGNORE INTO workspace_members (workspace_id, user_id, member_role)
+     SELECT id, ?, 'Member'
+     FROM workspaces`,
+    [user.id],
+  );
+
+  await execute(
+    `INSERT IGNORE INTO project_members (project_id, user_id)
+     SELECT p.id, ?
+     FROM projects p
+     JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+     WHERE wm.user_id = ?`,
+    [user.id, user.id],
+  );
+
+  await insertActivity({
+    workspaceId: null,
+    userId: user.id,
+    actionType: 'LOGIN',
+    title: 'Đăng ký tài khoản',
+    description: `${user.fullName} đã đăng ký tài khoản mới.`,
+  });
+
   res.status(201).json({ token, user });
 }));
 
