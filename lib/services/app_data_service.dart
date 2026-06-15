@@ -195,6 +195,36 @@ class AppDataService {
     return MockUser.fromJson(json['user'] as Map<String, dynamic>);
   }
 
+  static Future<MockUser> register({
+    required String fullName,
+    required String email,
+    required String password,
+  }) async {
+    final avatarText = fullName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .map((part) => part[0])
+        .join()
+        .toUpperCase();
+
+    final json = await apiClient.post(
+      '/auth/register',
+      body: {
+        'fullName': fullName,
+        'email': email,
+        'password': password,
+        'avatarText': avatarText.length > 2
+            ? avatarText.substring(0, 2)
+            : avatarText,
+      },
+    ) as Map<String, dynamic>;
+
+    await apiClient.setToken(json['token'].toString());
+
+    return MockUser.fromJson(json['user'] as Map<String, dynamic>);
+  }
+
   static Future<void> logout() async {
     await apiClient.clearToken();
   }
