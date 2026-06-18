@@ -20,6 +20,23 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS registration_verifications (
+  id VARCHAR(36) PRIMARY KEY,
+  email VARCHAR(191) NOT NULL UNIQUE,
+  full_name VARCHAR(191) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  avatar_text VARCHAR(8) NOT NULL,
+  verification_method ENUM('OTP', 'LINK', 'BOTH') NOT NULL DEFAULT 'OTP',
+  otp_hash CHAR(64) NULL,
+  verification_token_hash CHAR(64) NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_registration_verification_token (verification_token_hash),
+  INDEX idx_registration_verifications_expiry (expires_at)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS workspaces (
   id VARCHAR(36) PRIMARY KEY,
   name VARCHAR(191) NOT NULL,

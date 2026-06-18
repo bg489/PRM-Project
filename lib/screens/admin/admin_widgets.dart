@@ -73,10 +73,7 @@ class AdminStat {
 class AdminStatGrid extends StatelessWidget {
   final List<AdminStat> stats;
 
-  const AdminStatGrid({
-    super.key,
-    required this.stats,
-  });
+  const AdminStatGrid({super.key, required this.stats});
 
   @override
   Widget build(BuildContext context) {
@@ -96,11 +93,7 @@ class AdminSectionTitle extends StatelessWidget {
   final String title;
   final String? countLabel;
 
-  const AdminSectionTitle({
-    super.key,
-    required this.title,
-    this.countLabel,
-  });
+  const AdminSectionTitle({super.key, required this.title, this.countLabel});
 
   @override
   Widget build(BuildContext context) {
@@ -156,11 +149,7 @@ class AdminEmptyState extends StatelessWidget {
   final IconData icon;
   final String message;
 
-  const AdminEmptyState({
-    super.key,
-    required this.icon,
-    required this.message,
-  });
+  const AdminEmptyState({super.key, required this.icon, required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -227,10 +216,7 @@ class AdminErrorBanner extends StatelessWidget {
   }
 }
 
-InputDecoration adminInputDecoration({
-  required String label,
-  IconData? icon,
-}) {
+InputDecoration adminInputDecoration({required String label, IconData? icon}) {
   return InputDecoration(
     labelText: label,
     prefixIcon: icon == null ? null : Icon(icon),
@@ -259,10 +245,7 @@ BoxDecoration adminCardDecoration() {
 
 void showAdminMessage(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message),
-      behavior: SnackBarBehavior.floating,
-    ),
+    SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
   );
 }
 
@@ -386,4 +369,17 @@ class _AdminStatCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String normalizeAdminSearch(String value) {
+  return value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[àáạảãâầấậẩẫăằắặẳẵ]'), 'a')
+      .replaceAll(RegExp(r'[èéẹẻẽêềếệểễ]'), 'e')
+      .replaceAll(RegExp(r'[ìíịỉĩ]'), 'i')
+      .replaceAll(RegExp(r'[òóọỏõôồốộổỗơờớợởỡ]'), 'o')
+      .replaceAll(RegExp(r'[ùúụủũưừứựửữ]'), 'u')
+      .replaceAll(RegExp(r'[ỳýỵỷỹ]'), 'y')
+      .replaceAll('đ', 'd');
 }
