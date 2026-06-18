@@ -7,10 +7,7 @@ import '../../services/app_data_service.dart';
 class SecuritySettingsScreen extends StatefulWidget {
   final MockUser user;
 
-  const SecuritySettingsScreen({
-    super.key,
-    required this.user,
-  });
+  const SecuritySettingsScreen({super.key, required this.user});
 
   @override
   State<SecuritySettingsScreen> createState() => _SecuritySettingsScreenState();
@@ -18,10 +15,10 @@ class SecuritySettingsScreen extends StatefulWidget {
 
 class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   final TextEditingController currentPasswordController =
-  TextEditingController();
+      TextEditingController();
   final TextEditingController newPasswordController = TextEditingController();
   final TextEditingController confirmPasswordController =
-  TextEditingController();
+      TextEditingController();
 
   bool obscureCurrentPassword = true;
   bool obscureNewPassword = true;
@@ -77,6 +74,16 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       return;
     }
 
+    if (!RegExp(r'[A-Z]').hasMatch(newPassword)) {
+      showMessage('Mật khẩu mới phải có ít nhất 1 chữ hoa');
+      return;
+    }
+
+    if (!RegExp(r'[^A-Za-z0-9]').hasMatch(newPassword)) {
+      showMessage('Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt');
+      return;
+    }
+
     if (newPassword != confirmPassword) {
       showMessage('Mật khẩu xác nhận không khớp');
       return;
@@ -125,9 +132,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       setState(() {
         twoStepEnabled = updatedUser.twoStepEnabled;
       });
-      showMessage(
-        value ? 'Đã bật bảo mật 2 bước' : 'Đã tắt bảo mật 2 bước',
-      );
+      showMessage(value ? 'Đã bật bảo mật 2 bước' : 'Đã tắt bảo mật 2 bước');
     } catch (error) {
       if (!mounted) return;
       setState(() => twoStepEnabled = previousValue);
@@ -159,9 +164,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   }
 
   void copyToken() {
-    Clipboard.setData(
-      ClipboardData(text: sessionToken),
-    );
+    Clipboard.setData(ClipboardData(text: sessionToken));
 
     showMessage('Đã copy token phiên đăng nhập');
   }
@@ -186,7 +189,9 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(dialogContext);
-                showMessage('Chưa có phiên khác cần thu hồi trên backend hiện tại');
+                showMessage(
+                  'Chưa có phiên khác cần thu hồi trên backend hiện tại',
+                );
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFEF4444),
@@ -202,10 +207,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
 
   void showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -234,9 +236,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _Header(
-              onBack: () => Navigator.pop(context),
-            ),
+            _Header(onBack: () => Navigator.pop(context)),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
@@ -269,7 +269,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                                 onPressed: () {
                                   setState(() {
                                     obscureCurrentPassword =
-                                    !obscureCurrentPassword;
+                                        !obscureCurrentPassword;
                                   });
                                 },
                                 icon: Icon(
@@ -289,7 +289,8 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                             controller: newPasswordController,
                             obscureText: obscureNewPassword,
                             decoration: inputDecoration(
-                              hintText: 'Tối thiểu 6 ký tự',
+                              hintText:
+                                  'Tối thiểu 6 ký tự, có chữ hoa và ký tự đặc biệt',
                               icon: Icons.password_rounded,
                               suffixIcon: IconButton(
                                 onPressed: () {
@@ -320,7 +321,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                                 onPressed: () {
                                   setState(() {
                                     obscureConfirmPassword =
-                                    !obscureConfirmPassword;
+                                        !obscureConfirmPassword;
                                   });
                                 },
                                 icon: Icon(
@@ -338,17 +339,18 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                             width: double.infinity,
                             height: 50,
                             child: ElevatedButton.icon(
-                              onPressed:
-                              isSavingPassword ? null : changePassword,
+                              onPressed: isSavingPassword
+                                  ? null
+                                  : changePassword,
                               icon: isSavingPassword
                                   ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
                                   : const Icon(Icons.save_rounded),
                               label: Text(
                                 isSavingPassword
@@ -381,8 +383,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                           _SecuritySwitchTile(
                             icon: Icons.phonelink_lock_rounded,
                             title: 'Bảo mật 2 bước',
-                            subtitle:
-                            'Yêu cầu xác minh thêm khi đăng nhập',
+                            subtitle: 'Yêu cầu xác minh thêm khi đăng nhập',
                             value: twoStepEnabled,
                             onChanged: updateTwoStep,
                           ),
@@ -390,8 +391,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                           _SecuritySwitchTile(
                             icon: Icons.fingerprint_rounded,
                             title: 'Sinh trắc học',
-                            subtitle:
-                            'Mở khóa bằng vân tay/khuôn mặt',
+                            subtitle: 'Mở khóa bằng vân tay/khuôn mặt',
                             value: biometricEnabled,
                             onChanged: updateBiometric,
                           ),
@@ -410,7 +410,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                             icon: Icons.devices_rounded,
                             title: 'Thiết bị hiện tại',
                             content:
-                            'Android Emulator / Smartphone • Đang hoạt động',
+                                'Android Emulator / Smartphone • Đang hoạt động',
                           ),
                           const SizedBox(height: 12),
                           _InfoBlock(
@@ -494,9 +494,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
 class _Header extends StatelessWidget {
   final VoidCallback onBack;
 
-  const _Header({
-    required this.onBack,
-  });
+  const _Header({required this.onBack});
 
   @override
   Widget build(BuildContext context) {
@@ -504,10 +502,7 @@ class _Header extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Color(0xFF2563EB),
-            Color(0xFF9333EA),
-          ],
+          colors: [Color(0xFF2563EB), Color(0xFF9333EA)],
         ),
         borderRadius: BorderRadius.only(
           bottomLeft: Radius.circular(32),
@@ -551,10 +546,7 @@ class _Header extends StatelessWidget {
               color: Colors.white.withOpacity(0.16),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: const Icon(
-              Icons.shield_rounded,
-              color: Colors.white,
-            ),
+            child: const Icon(Icons.shield_rounded, color: Colors.white),
           ),
         ],
       ),
@@ -575,18 +567,17 @@ class _SecurityOverviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeCount =
-        [twoStepEnabled, biometricEnabled].where((item) => item).length;
+    final activeCount = [
+      twoStepEnabled,
+      biometricEnabled,
+    ].where((item) => item).length;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [
-            Color(0xFF111827),
-            Color(0xFF7C3AED),
-          ],
+          colors: [Color(0xFF111827), Color(0xFF7C3AED)],
         ),
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
@@ -677,10 +668,7 @@ class _SectionCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
-                icon,
-                color: const Color(0xFF7C3AED),
-              ),
+              Icon(icon, color: const Color(0xFF7C3AED)),
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
@@ -705,9 +693,7 @@ class _SectionCard extends StatelessWidget {
 class _FieldLabel extends StatelessWidget {
   final String label;
 
-  const _FieldLabel({
-    required this.label,
-  });
+  const _FieldLabel({required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -747,10 +733,7 @@ class _SecuritySwitchTile extends StatelessWidget {
           color: const Color(0xFFEDE9FE),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Icon(
-          icon,
-          color: const Color(0xFF7C3AED),
-        ),
+        child: Icon(icon, color: const Color(0xFF7C3AED)),
       ),
       title: Text(
         title,
@@ -796,10 +779,7 @@ class _InfoBlock extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            icon,
-            color: const Color(0xFF7C3AED),
-          ),
+          Icon(icon, color: const Color(0xFF7C3AED)),
           const SizedBox(width: 10),
           Expanded(
             child: Column(

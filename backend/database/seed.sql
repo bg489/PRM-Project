@@ -1,6 +1,7 @@
 USE productivity_management;
 
 SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE registration_verifications;
 TRUNCATE TABLE activity_logs;
 TRUNCATE TABLE notifications;
 TRUNCATE TABLE comments;

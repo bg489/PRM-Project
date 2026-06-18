@@ -167,15 +167,41 @@ class TaskDetailData {
   factory TaskDetailData.fromJson(Map<String, dynamic> json) {
     return TaskDetailData(
       task: MockTask.fromJson(json['task'] as Map<String, dynamic>),
-      checklistItems: _list(json['checklistItems'])
-          .map((item) => ChecklistItemData.fromJson(item))
-          .toList(),
-      requirements: _list(json['requirements'])
-          .map((item) => RequirementData.fromJson(item))
-          .toList(),
-      comments: _list(json['comments'])
-          .map((item) => CommentData.fromJson(item))
-          .toList(),
+      checklistItems: _list(
+        json['checklistItems'],
+      ).map((item) => ChecklistItemData.fromJson(item)).toList(),
+      requirements: _list(
+        json['requirements'],
+      ).map((item) => RequirementData.fromJson(item)).toList(),
+      comments: _list(
+        json['comments'],
+      ).map((item) => CommentData.fromJson(item)).toList(),
+    );
+  }
+}
+
+class RegistrationChallenge {
+  final String verificationId;
+  final String email;
+  final String verificationMethod;
+  final int expiresInSeconds;
+  final bool emailSent;
+
+  const RegistrationChallenge({
+    required this.verificationId,
+    required this.email,
+    required this.verificationMethod,
+    required this.expiresInSeconds,
+    required this.emailSent,
+  });
+
+  factory RegistrationChallenge.fromJson(Map<String, dynamic> json) {
+    return RegistrationChallenge(
+      verificationId: json['verificationId']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      verificationMethod: json['verificationMethod']?.toString() ?? 'OTP',
+      expiresInSeconds: (json['expiresInSeconds'] as num?)?.toInt() ?? 600,
+      emailSent: json['emailSent'] == true,
     );
   }
 }
@@ -187,18 +213,21 @@ class AppDataService {
     required String email,
     required String password,
   }) async {
-    final json = await apiClient.post(
-      '/auth/login',
-      body: {'email': email, 'password': password},
-    ) as Map<String, dynamic>;
+    final json =
+        await apiClient.post(
+              '/auth/login',
+              body: {'email': email, 'password': password},
+            )
+            as Map<String, dynamic>;
     await apiClient.setToken(json['token'].toString());
     return MockUser.fromJson(json['user'] as Map<String, dynamic>);
   }
 
-  static Future<MockUser> register({
+  static Future<RegistrationChallenge> requestRegistration({
     required String fullName,
     required String email,
     required String password,
+    required String verificationMethod,
   }) async {
     final avatarText = fullName
         .trim()
@@ -208,20 +237,41 @@ class AppDataService {
         .join()
         .toUpperCase();
 
-    final json = await apiClient.post(
-      '/auth/register',
-      body: {
-        'fullName': fullName,
-        'email': email,
-        'password': password,
-        'avatarText': avatarText.length > 2
-            ? avatarText.substring(0, 2)
-            : avatarText,
-      },
-    ) as Map<String, dynamic>;
+    final json =
+        await apiClient.post(
+              '/auth/register/request',
+              body: {
+                'fullName': fullName,
+                'email': email,
+                'password': password,
+                'verificationMethod': verificationMethod,
+                'avatarText': avatarText.length > 2
+                    ? avatarText.substring(0, 2)
+                    : avatarText,
+              },
+            )
+            as Map<String, dynamic>;
+
+    return RegistrationChallenge.fromJson(json);
+  }
+
+  static Future<MockUser> verifyRegistration({
+    required String verificationId,
+    String? otp,
+    String? token,
+  }) async {
+    final json =
+        await apiClient.post(
+              '/auth/register/verify',
+              body: {
+                'verificationId': verificationId,
+                if (otp != null && otp.isNotEmpty) 'otp': otp,
+                if (token != null && token.isNotEmpty) 'token': token,
+              },
+            )
+            as Map<String, dynamic>;
 
     await apiClient.setToken(json['token'].toString());
-
     return MockUser.fromJson(json['user'] as Map<String, dynamic>);
   }
 
@@ -254,7 +304,8 @@ class AppDataService {
       body: {
         if (twoStepEnabled != null) 'twoStepEnabled': twoStepEnabled,
         if (biometricEnabled != null) 'biometricEnabled': biometricEnabled,
-        if (notificationEnabled != null) 'notificationEnabled': notificationEnabled,
+        if (notificationEnabled != null)
+          'notificationEnabled': notificationEnabled,
       },
     );
     return MockUser.fromJson(json as Map<String, dynamic>);
@@ -267,10 +318,7 @@ class AppDataService {
   }) async {
     await apiClient.post(
       '/users/$userId/change-password',
-      body: {
-        'currentPassword': currentPassword,
-        'newPassword': newPassword,
-      },
+      body: {'currentPassword': currentPassword, 'newPassword': newPassword},
     );
   }
 
@@ -393,14 +441,22 @@ class AppDataService {
   }
 
   static Future<List<MockTask>> fetchTasks({
+    String? workspaceId,
     String? projectId,
     String? assigneeId,
+    String? status,
+    String? priority,
+    String? search,
   }) async {
     final json = await apiClient.get(
       '/tasks',
       query: {
+        'workspaceId': workspaceId,
         'projectId': projectId,
         'assigneeId': assigneeId,
+        'status': status,
+        'priority': priority,
+        'search': search,
       },
     );
     return _list(json).map((item) => MockTask.fromJson(item)).toList();
@@ -451,10 +507,7 @@ class AppDataService {
   }
 
   static Future<MockTask> updateTask(MockTask task) async {
-    final json = await apiClient.put(
-      '/tasks/${task.id}',
-      body: task.toJson(),
-    );
+    final json = await apiClient.put('/tasks/${task.id}', body: task.toJson());
     return MockTask.fromJson(json as Map<String, dynamic>);
   }
 
@@ -509,13 +562,11 @@ class AppDataService {
   }) async {
     final json = await apiClient.get(
       '/approval-requests',
-      query: {
-        'userId': userId,
-        'projectId': projectId,
-        'status': status,
-      },
+      query: {'userId': userId, 'projectId': projectId, 'status': status},
     );
-    return _list(json).map((item) => MockApprovalRequest.fromJson(item)).toList();
+    return _list(
+      json,
+    ).map((item) => MockApprovalRequest.fromJson(item)).toList();
   }
 
   static Future<MockApprovalRequest> reviewApprovalRequest({
@@ -536,10 +587,13 @@ class AppDataService {
   static Future<List<MockUserNotification>> fetchNotifications({
     required String userId,
   }) async {
-    final json = await apiClient.get('/notifications', query: {'userId': userId});
-    return _list(json)
-        .map((item) => MockUserNotification.fromJson(item))
-        .toList();
+    final json = await apiClient.get(
+      '/notifications',
+      query: {'userId': userId},
+    );
+    return _list(
+      json,
+    ).map((item) => MockUserNotification.fromJson(item)).toList();
   }
 
   static Future<MockUserNotification> markNotificationRead(String id) async {

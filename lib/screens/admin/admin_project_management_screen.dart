@@ -16,19 +16,55 @@ class _AdminProjectManagementScreenState
     extends State<AdminProjectManagementScreen> {
   List<MockWorkspace> workspaces = List.from(mockWorkspaces);
   List<MockProject> projects = List.from(mockProjects);
+  final TextEditingController projectSearchController = TextEditingController();
   String selectedWorkspaceFilter = 'all';
   String selectedStatusFilter = 'all';
+  String selectedTaskCountFilter = 'all';
+  String selectedProjectSort = 'az';
   bool isLoading = true;
   String? errorMessage;
 
   List<MockProject> get filteredProjects {
-    return projects.where((project) {
-      final matchWorkspace = selectedWorkspaceFilter == 'all' ||
+    final search = normalizeAdminSearch(projectSearchController.text);
+    final result = projects.where((project) {
+      final matchWorkspace =
+          selectedWorkspaceFilter == 'all' ||
           project.workspaceId == selectedWorkspaceFilter;
-      final matchStatus = selectedStatusFilter == 'all' ||
+      final matchStatus =
+          selectedStatusFilter == 'all' ||
           project.status == selectedStatusFilter;
-      return matchWorkspace && matchStatus;
+      final matchSearch =
+          search.isEmpty ||
+          normalizeAdminSearch(project.name).contains(search) ||
+          normalizeAdminSearch(project.code).contains(search) ||
+          normalizeAdminSearch(
+            getWorkspaceName(project.workspaceId),
+          ).contains(search);
+      final matchTaskCount = switch (selectedTaskCountFilter) {
+        'none' => project.totalTasks == 0,
+        '1-5' => project.totalTasks >= 1 && project.totalTasks <= 5,
+        '6-20' => project.totalTasks >= 6 && project.totalTasks <= 20,
+        '21+' => project.totalTasks >= 21,
+        _ => true,
+      };
+      return matchWorkspace && matchStatus && matchSearch && matchTaskCount;
     }).toList();
+
+    result.sort((first, second) {
+      return switch (selectedProjectSort) {
+        'za' => normalizeAdminSearch(
+          second.name,
+        ).compareTo(normalizeAdminSearch(first.name)),
+        'tasksAsc' => first.totalTasks.compareTo(second.totalTasks),
+        'tasksDesc' => second.totalTasks.compareTo(first.totalTasks),
+        'progressAsc' => first.progress.compareTo(second.progress),
+        'progressDesc' => second.progress.compareTo(first.progress),
+        _ => normalizeAdminSearch(
+          first.name,
+        ).compareTo(normalizeAdminSearch(second.name)),
+      };
+    });
+    return result;
   }
 
   int get activeProjects {
@@ -47,6 +83,12 @@ class _AdminProjectManagementScreenState
   void initState() {
     super.initState();
     loadData();
+  }
+
+  @override
+  void dispose() {
+    projectSearchController.dispose();
+    super.dispose();
   }
 
   Future<void> loadData() async {
@@ -69,7 +111,8 @@ class _AdminProjectManagementScreenState
       setState(() {
         workspaces = List.from(mockWorkspaces);
         projects = List.from(mockProjects);
-        errorMessage = 'Chưa kết nối được backend, đang hiển thị project dự phòng.';
+        errorMessage =
+            'Chưa kết nối được backend, đang hiển thị project dự phòng.';
         isLoading = false;
       });
     }
@@ -187,10 +230,12 @@ class _AdminProjectManagementScreenState
                           final pickedDate = await showDatePicker(
                             context: context,
                             initialDate: selectedDeadline,
-                            firstDate: DateTime.now()
-                                .subtract(const Duration(days: 365)),
-                            lastDate: DateTime.now()
-                                .add(const Duration(days: 365 * 2)),
+                            firstDate: DateTime.now().subtract(
+                              const Duration(days: 365),
+                            ),
+                            lastDate: DateTime.now().add(
+                              const Duration(days: 365 * 2),
+                            ),
                           );
                           if (pickedDate == null) return;
                           setSheetState(() {
@@ -214,10 +259,11 @@ class _AdminProjectManagementScreenState
                               ? null
                               : () async {
                                   final name = nameController.text.trim();
-                                  final code =
-                                      codeController.text.trim().toUpperCase();
-                                  final description =
-                                      descriptionController.text.trim();
+                                  final code = codeController.text
+                                      .trim()
+                                      .toUpperCase();
+                                  final description = descriptionController.text
+                                      .trim();
 
                                   if (name.isEmpty || code.isEmpty) {
                                     showAdminMessage(
@@ -235,19 +281,20 @@ class _AdminProjectManagementScreenState
                                     final savedProject = isEditMode
                                         ? await AppDataService.updateProject(
                                             MockProject(
-                                              id: project!.id,
+                                              id: project.id,
                                               workspaceId: selectedWorkspaceId,
                                               name: name,
                                               description: description,
                                               code: code,
-                                              deadline:
-                                                  _formatDeadline(selectedDeadline),
-                                              progress: project!.progress,
-                                              totalTasks: project!.totalTasks,
+                                              deadline: _formatDeadline(
+                                                selectedDeadline,
+                                              ),
+                                              progress: project.progress,
+                                              totalTasks: project.totalTasks,
                                               completedTasks:
-                                                  project!.completedTasks,
-                                              members: project!.members,
-                                              status: project!.status,
+                                                  project.completedTasks,
+                                              members: project.members,
+                                              status: project.status,
                                             ),
                                           )
                                         : await AppDataService.createProject(
@@ -255,11 +302,15 @@ class _AdminProjectManagementScreenState
                                             name: name,
                                             code: code,
                                             description: description,
-                                            deadline:
-                                                _formatDeadline(selectedDeadline),
+                                            deadline: _formatDeadline(
+                                              selectedDeadline,
+                                            ),
                                           );
 
-                                    if (!mounted) return;
+                                    if (!mounted ||
+                                        !bottomSheetContext.mounted) {
+                                      return;
+                                    }
                                     setState(() {
                                       if (isEditMode) {
                                         final index = projects.indexWhere(
@@ -281,7 +332,10 @@ class _AdminProjectManagementScreenState
                                           : 'Đã tạo project mới',
                                     );
                                   } catch (error) {
-                                    if (!mounted) return;
+                                    if (!mounted ||
+                                        !bottomSheetContext.mounted) {
+                                      return;
+                                    }
                                     setSheetState(() {
                                       isSaving = false;
                                     });
@@ -300,8 +354,14 @@ class _AdminProjectManagementScreenState
                                     color: Colors.white,
                                   ),
                                 )
-                              : Icon(isEditMode ? Icons.save_rounded : Icons.add_rounded),
-                          label: Text(isEditMode ? 'Lưu thay đổi' : 'Tạo project'),
+                              : Icon(
+                                  isEditMode
+                                      ? Icons.save_rounded
+                                      : Icons.add_rounded,
+                                ),
+                          label: Text(
+                            isEditMode ? 'Lưu thay đổi' : 'Tạo project',
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF7C3AED),
                             foregroundColor: Colors.white,
@@ -363,7 +423,9 @@ class _AdminProjectManagementScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
           title: const Text('Xóa Project'),
           content: Text(
             project.totalTasks > 0
@@ -562,8 +624,12 @@ class _AdminProjectManagementScreenState
                     const SizedBox(height: 18),
                     _FilterPanel(
                       workspaces: workspaces,
+                      searchController: projectSearchController,
                       selectedWorkspaceFilter: selectedWorkspaceFilter,
                       selectedStatusFilter: selectedStatusFilter,
+                      selectedTaskCountFilter: selectedTaskCountFilter,
+                      selectedSort: selectedProjectSort,
+                      onSearchChanged: (_) => setState(() {}),
                       onWorkspaceChanged: (value) {
                         setState(() {
                           selectedWorkspaceFilter = value;
@@ -572,6 +638,16 @@ class _AdminProjectManagementScreenState
                       onStatusChanged: (value) {
                         setState(() {
                           selectedStatusFilter = value;
+                        });
+                      },
+                      onTaskCountChanged: (value) {
+                        setState(() {
+                          selectedTaskCountFilter = value;
+                        });
+                      },
+                      onSortChanged: (value) {
+                        setState(() {
+                          selectedProjectSort = value;
                         });
                       },
                     ),
@@ -592,7 +668,9 @@ class _AdminProjectManagementScreenState
                           padding: const EdgeInsets.only(bottom: 12),
                           child: _ProjectAdminCard(
                             project: project,
-                            workspaceName: getWorkspaceName(project.workspaceId),
+                            workspaceName: getWorkspaceName(
+                              project.workspaceId,
+                            ),
                             onView: () => showProjectDetail(project),
                             onEdit: () => openProjectForm(project: project),
                             onArchive: () => toggleArchiveProject(project),
@@ -645,17 +723,29 @@ class _AdminProjectManagementScreenState
 
 class _FilterPanel extends StatelessWidget {
   final List<MockWorkspace> workspaces;
+  final TextEditingController searchController;
   final String selectedWorkspaceFilter;
   final String selectedStatusFilter;
+  final String selectedTaskCountFilter;
+  final String selectedSort;
+  final ValueChanged<String> onSearchChanged;
   final ValueChanged<String> onWorkspaceChanged;
   final ValueChanged<String> onStatusChanged;
+  final ValueChanged<String> onTaskCountChanged;
+  final ValueChanged<String> onSortChanged;
 
   const _FilterPanel({
     required this.workspaces,
+    required this.searchController,
     required this.selectedWorkspaceFilter,
     required this.selectedStatusFilter,
+    required this.selectedTaskCountFilter,
+    required this.selectedSort,
+    required this.onSearchChanged,
     required this.onWorkspaceChanged,
     required this.onStatusChanged,
+    required this.onTaskCountChanged,
+    required this.onSortChanged,
   });
 
   @override
@@ -663,6 +753,15 @@ class _FilterPanel extends StatelessWidget {
     return AdminCard(
       child: Column(
         children: [
+          TextField(
+            controller: searchController,
+            onChanged: onSearchChanged,
+            decoration: adminInputDecoration(
+              label: 'Tìm project theo tên',
+              icon: Icons.search_rounded,
+            ),
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: selectedWorkspaceFilter,
             decoration: adminInputDecoration(
@@ -670,7 +769,10 @@ class _FilterPanel extends StatelessWidget {
               icon: Icons.workspaces_outline,
             ),
             items: [
-              const DropdownMenuItem(value: 'all', child: Text('Tất cả Workspace')),
+              const DropdownMenuItem(
+                value: 'all',
+                child: Text('Tất cả Workspace'),
+              ),
               ...workspaces.map((workspace) {
                 return DropdownMenuItem(
                   value: workspace.id,
@@ -680,6 +782,24 @@ class _FilterPanel extends StatelessWidget {
             ],
             onChanged: (value) {
               if (value != null) onWorkspaceChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedTaskCountFilter,
+            decoration: adminInputDecoration(
+              label: 'Lọc theo số task',
+              icon: Icons.filter_list_rounded,
+            ),
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('Tất cả số lượng')),
+              DropdownMenuItem(value: 'none', child: Text('Chưa có task')),
+              DropdownMenuItem(value: '1-5', child: Text('Từ 1 đến 5 task')),
+              DropdownMenuItem(value: '6-20', child: Text('Từ 6 đến 20 task')),
+              DropdownMenuItem(value: '21+', child: Text('Từ 21 task trở lên')),
+            ],
+            onChanged: (value) {
+              if (value != null) onTaskCountChanged(value);
             },
           ),
           const SizedBox(height: 12),
@@ -696,6 +816,37 @@ class _FilterPanel extends StatelessWidget {
             ],
             onChanged: (value) {
               if (value != null) onStatusChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedSort,
+            decoration: adminInputDecoration(
+              label: 'Sắp xếp project',
+              icon: Icons.sort_by_alpha_rounded,
+            ),
+            items: const [
+              DropdownMenuItem(value: 'az', child: Text('Tên A → Z')),
+              DropdownMenuItem(value: 'za', child: Text('Tên Z → A')),
+              DropdownMenuItem(
+                value: 'tasksAsc',
+                child: Text('Số task tăng dần'),
+              ),
+              DropdownMenuItem(
+                value: 'tasksDesc',
+                child: Text('Số task giảm dần'),
+              ),
+              DropdownMenuItem(
+                value: 'progressAsc',
+                child: Text('Tiến độ tăng dần'),
+              ),
+              DropdownMenuItem(
+                value: 'progressDesc',
+                child: Text('Tiến độ giảm dần'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) onSortChanged(value);
             },
           ),
         ],
@@ -733,9 +884,13 @@ class _ProjectAdminCard extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 28,
-                backgroundColor:
-                    isArchived ? const Color(0xFF6B7280) : const Color(0xFF7C3AED),
-                child: const Icon(Icons.folder_open_rounded, color: Colors.white),
+                backgroundColor: isArchived
+                    ? const Color(0xFF6B7280)
+                    : const Color(0xFF7C3AED),
+                child: const Icon(
+                  Icons.folder_open_rounded,
+                  color: Colors.white,
+                ),
               ),
               const SizedBox(width: 13),
               Expanded(
@@ -799,7 +954,9 @@ class _ProjectAdminCard extends StatelessWidget {
               value: project.progress.clamp(0.0, 1.0).toDouble(),
               minHeight: 8,
               backgroundColor: const Color(0xFFE5E7EB),
-              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF2563EB)),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Color(0xFF2563EB),
+              ),
             ),
           ),
           const SizedBox(height: 14),
@@ -843,7 +1000,9 @@ class _ProjectAdminCard extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: onArchive,
                   icon: Icon(
-                    isArchived ? Icons.unarchive_outlined : Icons.archive_outlined,
+                    isArchived
+                        ? Icons.unarchive_outlined
+                        : Icons.archive_outlined,
                     size: 18,
                   ),
                   label: Text(isArchived ? 'Khôi phục' : 'Archive'),

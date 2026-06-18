@@ -14,24 +14,93 @@ class AdminTaskManagementScreen extends StatefulWidget {
 }
 
 class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
+  List<MockWorkspace> workspaces = List.from(mockWorkspaces);
   List<MockTask> tasks = List.from(mockTasks);
   List<MockProject> projects = List.from(mockProjects);
+  final TextEditingController taskSearchController = TextEditingController();
+  String selectedWorkspaceFilter = 'all';
   String selectedProjectFilter = 'all';
   String selectedStatusFilter = 'all';
   String selectedPriorityFilter = 'all';
+  String selectedChecklistCountFilter = 'all';
+  String selectedCommentCountFilter = 'all';
+  String selectedTaskSort = 'az';
   bool isLoading = true;
   String? errorMessage;
 
   List<MockTask> get filteredTasks {
-    return tasks.where((task) {
+    final result = tasks.where((task) {
+      final projectIndex = projects.indexWhere(
+        (item) => item.id == task.projectId,
+      );
+      final project = projectIndex == -1 ? null : projects[projectIndex];
+      final matchWorkspace =
+          selectedWorkspaceFilter == 'all' ||
+          project?.workspaceId == selectedWorkspaceFilter;
       final matchProject =
-          selectedProjectFilter == 'all' || task.projectId == selectedProjectFilter;
+          selectedProjectFilter == 'all' ||
+          task.projectId == selectedProjectFilter;
       final matchStatus =
           selectedStatusFilter == 'all' || task.status == selectedStatusFilter;
       final matchPriority =
-          selectedPriorityFilter == 'all' || task.priority == selectedPriorityFilter;
-      return matchProject && matchStatus && matchPriority;
+          selectedPriorityFilter == 'all' ||
+          task.priority == selectedPriorityFilter;
+      final search = normalizeAdminSearch(taskSearchController.text);
+      final projectName = normalizeAdminSearch(project?.name ?? '');
+      final workspaceName = project == null
+          ? ''
+          : normalizeAdminSearch(getWorkspaceName(project.workspaceId));
+      final matchSearch =
+          search.isEmpty ||
+          normalizeAdminSearch(task.title).contains(search) ||
+          normalizeAdminSearch(task.description).contains(search) ||
+          projectName.contains(search) ||
+          workspaceName.contains(search);
+      final matchChecklistCount = switch (selectedChecklistCountFilter) {
+        'none' => task.checklistTotal == 0,
+        '1-5' => task.checklistTotal >= 1 && task.checklistTotal <= 5,
+        '6+' => task.checklistTotal >= 6,
+        _ => true,
+      };
+      final matchCommentCount = switch (selectedCommentCountFilter) {
+        'none' => task.commentCount == 0,
+        '1-3' => task.commentCount >= 1 && task.commentCount <= 3,
+        '4+' => task.commentCount >= 4,
+        _ => true,
+      };
+      return matchWorkspace &&
+          matchProject &&
+          matchStatus &&
+          matchPriority &&
+          matchSearch &&
+          matchChecklistCount &&
+          matchCommentCount;
     }).toList();
+
+    result.sort((first, second) {
+      return switch (selectedTaskSort) {
+        'za' => normalizeAdminSearch(
+          second.title,
+        ).compareTo(normalizeAdminSearch(first.title)),
+        'checklistAsc' => first.checklistTotal.compareTo(second.checklistTotal),
+        'checklistDesc' => second.checklistTotal.compareTo(
+          first.checklistTotal,
+        ),
+        'commentsAsc' => first.commentCount.compareTo(second.commentCount),
+        'commentsDesc' => second.commentCount.compareTo(first.commentCount),
+        _ => normalizeAdminSearch(
+          first.title,
+        ).compareTo(normalizeAdminSearch(second.title)),
+      };
+    });
+    return result;
+  }
+
+  List<MockProject> get workspaceFilteredProjects {
+    if (selectedWorkspaceFilter == 'all') return projects;
+    return projects
+        .where((project) => project.workspaceId == selectedWorkspaceFilter)
+        .toList();
   }
 
   int get doneTasks {
@@ -61,10 +130,12 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
     });
 
     try {
+      final loadedWorkspaces = await AppDataService.fetchWorkspaces();
       final loadedProjects = await AppDataService.fetchProjects();
       final loadedTasks = await AppDataService.fetchTasks();
       if (!mounted) return;
       setState(() {
+        workspaces = loadedWorkspaces;
         projects = loadedProjects;
         tasks = loadedTasks;
         isLoading = false;
@@ -72,12 +143,20 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() {
+        workspaces = List.from(mockWorkspaces);
         projects = List.from(mockProjects);
         tasks = List.from(mockTasks);
-        errorMessage = 'Chưa kết nối được backend, đang hiển thị task dự phòng.';
+        errorMessage =
+            'Chưa kết nối được backend, đang hiển thị task dự phòng.';
         isLoading = false;
       });
     }
+  }
+
+  @override
+  void dispose() {
+    taskSearchController.dispose();
+    super.dispose();
   }
 
   String getProjectName(String projectId) {
@@ -85,6 +164,16 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
       return projects.firstWhere((project) => project.id == projectId).name;
     } catch (_) {
       return 'Không rõ project';
+    }
+  }
+
+  String getWorkspaceName(String workspaceId) {
+    try {
+      return workspaces
+          .firstWhere((workspace) => workspace.id == workspaceId)
+          .name;
+    } catch (_) {
+      return 'Không rõ workspace';
     }
   }
 
@@ -120,7 +209,9 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
           title: const Text('Xóa Task'),
           content: Text('Bạn có chắc muốn xóa task "${task.title}" không?'),
           actions: [
@@ -358,10 +449,27 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
                     ),
                     const SizedBox(height: 18),
                     _FilterPanel(
-                      projects: projects,
+                      workspaces: workspaces,
+                      projects: workspaceFilteredProjects,
+                      taskSearchController: taskSearchController,
+                      selectedWorkspaceFilter: selectedWorkspaceFilter,
                       selectedProjectFilter: selectedProjectFilter,
                       selectedStatusFilter: selectedStatusFilter,
                       selectedPriorityFilter: selectedPriorityFilter,
+                      selectedChecklistCountFilter:
+                          selectedChecklistCountFilter,
+                      selectedCommentCountFilter: selectedCommentCountFilter,
+                      selectedSort: selectedTaskSort,
+                      onWorkspaceChanged: (value) {
+                        setState(() {
+                          selectedWorkspaceFilter = value;
+                          if (!workspaceFilteredProjects.any(
+                            (project) => project.id == selectedProjectFilter,
+                          )) {
+                            selectedProjectFilter = 'all';
+                          }
+                        });
+                      },
                       onProjectChanged: (value) {
                         setState(() {
                           selectedProjectFilter = value;
@@ -377,6 +485,22 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
                           selectedPriorityFilter = value;
                         });
                       },
+                      onChecklistCountChanged: (value) {
+                        setState(() {
+                          selectedChecklistCountFilter = value;
+                        });
+                      },
+                      onCommentCountChanged: (value) {
+                        setState(() {
+                          selectedCommentCountFilter = value;
+                        });
+                      },
+                      onSortChanged: (value) {
+                        setState(() {
+                          selectedTaskSort = value;
+                        });
+                      },
+                      onSearchChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 18),
                     AdminSectionTitle(
@@ -415,22 +539,44 @@ class _AdminTaskManagementScreenState extends State<AdminTaskManagementScreen> {
 }
 
 class _FilterPanel extends StatelessWidget {
+  final List<MockWorkspace> workspaces;
   final List<MockProject> projects;
+  final TextEditingController taskSearchController;
+  final String selectedWorkspaceFilter;
   final String selectedProjectFilter;
   final String selectedStatusFilter;
   final String selectedPriorityFilter;
+  final String selectedChecklistCountFilter;
+  final String selectedCommentCountFilter;
+  final String selectedSort;
+  final ValueChanged<String> onWorkspaceChanged;
   final ValueChanged<String> onProjectChanged;
   final ValueChanged<String> onStatusChanged;
   final ValueChanged<String> onPriorityChanged;
+  final ValueChanged<String> onChecklistCountChanged;
+  final ValueChanged<String> onCommentCountChanged;
+  final ValueChanged<String> onSortChanged;
+  final ValueChanged<String> onSearchChanged;
 
   const _FilterPanel({
+    required this.workspaces,
     required this.projects,
+    required this.taskSearchController,
+    required this.selectedWorkspaceFilter,
     required this.selectedProjectFilter,
     required this.selectedStatusFilter,
     required this.selectedPriorityFilter,
+    required this.selectedChecklistCountFilter,
+    required this.selectedCommentCountFilter,
+    required this.selectedSort,
+    required this.onWorkspaceChanged,
     required this.onProjectChanged,
     required this.onStatusChanged,
     required this.onPriorityChanged,
+    required this.onChecklistCountChanged,
+    required this.onCommentCountChanged,
+    required this.onSortChanged,
+    required this.onSearchChanged,
   });
 
   @override
@@ -438,6 +584,38 @@ class _FilterPanel extends StatelessWidget {
     return AdminCard(
       child: Column(
         children: [
+          TextField(
+            controller: taskSearchController,
+            onChanged: onSearchChanged,
+            decoration: adminInputDecoration(
+              label: 'Tìm task theo tên',
+              icon: Icons.search_rounded,
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedWorkspaceFilter,
+            decoration: adminInputDecoration(
+              label: 'Lọc theo workspace',
+              icon: Icons.workspaces_outline,
+            ),
+            items: [
+              const DropdownMenuItem(
+                value: 'all',
+                child: Text('Tất cả Workspace'),
+              ),
+              ...workspaces.map((workspace) {
+                return DropdownMenuItem(
+                  value: workspace.id,
+                  child: Text(workspace.name),
+                );
+              }),
+            ],
+            onChanged: (value) {
+              if (value != null) onWorkspaceChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: selectedProjectFilter,
             decoration: adminInputDecoration(
@@ -445,7 +623,10 @@ class _FilterPanel extends StatelessWidget {
               icon: Icons.folder_open_outlined,
             ),
             items: [
-              const DropdownMenuItem(value: 'all', child: Text('Tất cả Project')),
+              const DropdownMenuItem(
+                value: 'all',
+                child: Text('Tất cả Project'),
+              ),
               ...projects.map((project) {
                 return DropdownMenuItem(
                   value: project.id,
@@ -465,7 +646,10 @@ class _FilterPanel extends StatelessWidget {
               icon: Icons.view_kanban_outlined,
             ),
             items: [
-              const DropdownMenuItem(value: 'all', child: Text('Tất cả trạng thái')),
+              const DropdownMenuItem(
+                value: 'all',
+                child: Text('Tất cả trạng thái'),
+              ),
               ...kanbanColumns.map((status) {
                 return DropdownMenuItem(value: status, child: Text(status));
               }),
@@ -489,6 +673,86 @@ class _FilterPanel extends StatelessWidget {
             ],
             onChanged: (value) {
               if (value != null) onPriorityChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedChecklistCountFilter,
+            decoration: adminInputDecoration(
+              label: 'Lọc theo số checklist',
+              icon: Icons.checklist_rounded,
+            ),
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('Tất cả số lượng')),
+              DropdownMenuItem(
+                value: 'none',
+                child: Text('Không có checklist'),
+              ),
+              DropdownMenuItem(
+                value: '1-5',
+                child: Text('Từ 1 đến 5 checklist'),
+              ),
+              DropdownMenuItem(
+                value: '6+',
+                child: Text('Từ 6 checklist trở lên'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) onChecklistCountChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedCommentCountFilter,
+            decoration: adminInputDecoration(
+              label: 'Lọc theo số bình luận',
+              icon: Icons.chat_bubble_outline_rounded,
+            ),
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('Tất cả số lượng')),
+              DropdownMenuItem(value: 'none', child: Text('Chưa có bình luận')),
+              DropdownMenuItem(
+                value: '1-3',
+                child: Text('Từ 1 đến 3 bình luận'),
+              ),
+              DropdownMenuItem(
+                value: '4+',
+                child: Text('Từ 4 bình luận trở lên'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) onCommentCountChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedSort,
+            decoration: adminInputDecoration(
+              label: 'Sắp xếp task',
+              icon: Icons.sort_by_alpha_rounded,
+            ),
+            items: const [
+              DropdownMenuItem(value: 'az', child: Text('Tên A → Z')),
+              DropdownMenuItem(value: 'za', child: Text('Tên Z → A')),
+              DropdownMenuItem(
+                value: 'checklistAsc',
+                child: Text('Số checklist tăng dần'),
+              ),
+              DropdownMenuItem(
+                value: 'checklistDesc',
+                child: Text('Số checklist giảm dần'),
+              ),
+              DropdownMenuItem(
+                value: 'commentsAsc',
+                child: Text('Số bình luận tăng dần'),
+              ),
+              DropdownMenuItem(
+                value: 'commentsDesc',
+                child: Text('Số bình luận giảm dần'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) onSortChanged(value);
             },
           ),
         ],
@@ -518,10 +782,12 @@ class _TaskAdminCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final checklistProgress =
-        task.checklistTotal == 0 ? 0.0 : task.checklistDone / task.checklistTotal;
-    final statusValue =
-        kanbanColumns.contains(task.status) ? task.status : kanbanColumns.first;
+    final checklistProgress = task.checklistTotal == 0
+        ? 0.0
+        : task.checklistDone / task.checklistTotal;
+    final statusValue = kanbanColumns.contains(task.status)
+        ? task.status
+        : kanbanColumns.first;
 
     return AdminCard(
       child: Column(
@@ -578,10 +844,7 @@ class _TaskAdminCard extends StatelessWidget {
                 color: const Color(0xFF2563EB),
               ),
               const SizedBox(width: 8),
-              AdminPill(
-                label: task.dueDate,
-                color: const Color(0xFFF59E0B),
-              ),
+              AdminPill(label: task.dueDate, color: const Color(0xFFF59E0B)),
             ],
           ),
           const SizedBox(height: 12),

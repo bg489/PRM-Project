@@ -16,8 +16,56 @@ class _AdminWorkspaceManagementScreenState
     extends State<AdminWorkspaceManagementScreen> {
   List<MockWorkspace> workspaces = List.from(mockWorkspaces);
   List<MockProject> projects = List.from(mockProjects);
+  final TextEditingController workspaceSearchController =
+      TextEditingController();
+  String selectedProjectCountFilter = 'all';
+  String selectedWorkspaceSort = 'az';
   bool isLoading = true;
   String? errorMessage;
+
+  List<MockWorkspace> get filteredWorkspaces {
+    final search = normalizeAdminSearch(workspaceSearchController.text);
+    final result = workspaces.where((workspace) {
+      final projectCount = getWorkspaceProjectCount(workspace.id);
+      final matchesSearch =
+          search.isEmpty ||
+          normalizeAdminSearch(workspace.name).contains(search) ||
+          normalizeAdminSearch(workspace.description).contains(search);
+      final matchesProjectCount = switch (selectedProjectCountFilter) {
+        'none' => projectCount == 0,
+        '1-3' => projectCount >= 1 && projectCount <= 3,
+        '4+' => projectCount >= 4,
+        _ => true,
+      };
+      return matchesSearch && matchesProjectCount;
+    }).toList();
+
+    result.sort((first, second) {
+      return switch (selectedWorkspaceSort) {
+        'za' => normalizeAdminSearch(
+          second.name,
+        ).compareTo(normalizeAdminSearch(first.name)),
+        'projectsAsc' => getWorkspaceProjectCount(
+          first.id,
+        ).compareTo(getWorkspaceProjectCount(second.id)),
+        'projectsDesc' => getWorkspaceProjectCount(
+          second.id,
+        ).compareTo(getWorkspaceProjectCount(first.id)),
+        'membersAsc' => first.memberCount.compareTo(second.memberCount),
+        'membersDesc' => second.memberCount.compareTo(first.memberCount),
+        _ => normalizeAdminSearch(
+          first.name,
+        ).compareTo(normalizeAdminSearch(second.name)),
+      };
+    });
+    return result;
+  }
+
+  int getWorkspaceProjectCount(String workspaceId) {
+    return projects
+        .where((project) => project.workspaceId == workspaceId)
+        .length;
+  }
 
   int get totalMembers {
     return workspaces.fold(0, (sum, workspace) => sum + workspace.memberCount);
@@ -27,6 +75,12 @@ class _AdminWorkspaceManagementScreenState
   void initState() {
     super.initState();
     loadData();
+  }
+
+  @override
+  void dispose() {
+    workspaceSearchController.dispose();
+    super.dispose();
   }
 
   Future<void> loadData() async {
@@ -49,7 +103,8 @@ class _AdminWorkspaceManagementScreenState
       setState(() {
         workspaces = List.from(mockWorkspaces);
         projects = List.from(mockProjects);
-        errorMessage = 'Chưa kết nối được backend, đang hiển thị workspace dự phòng.';
+        errorMessage =
+            'Chưa kết nối được backend, đang hiển thị workspace dự phòng.';
         isLoading = false;
       });
     }
@@ -61,7 +116,9 @@ class _AdminWorkspaceManagementScreenState
     final descriptionController = TextEditingController(
       text: workspace?.description ?? '',
     );
-    final iconController = TextEditingController(text: workspace?.iconText ?? 'WS');
+    final iconController = TextEditingController(
+      text: workspace?.iconText ?? 'WS',
+    );
 
     await showModalBottomSheet(
       context: context,
@@ -90,7 +147,9 @@ class _AdminWorkspaceManagementScreenState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isEditMode ? 'Chỉnh sửa Workspace' : 'Tạo Workspace mới',
+                        isEditMode
+                            ? 'Chỉnh sửa Workspace'
+                            : 'Tạo Workspace mới',
                         style: const TextStyle(
                           color: Color(0xFF111827),
                           fontSize: 22,
@@ -133,10 +192,11 @@ class _AdminWorkspaceManagementScreenState
                               ? null
                               : () async {
                                   final name = nameController.text.trim();
-                                  final description =
-                                      descriptionController.text.trim();
-                                  final iconText =
-                                      iconController.text.trim().toUpperCase();
+                                  final description = descriptionController.text
+                                      .trim();
+                                  final iconText = iconController.text
+                                      .trim()
+                                      .toUpperCase();
 
                                   if (name.isEmpty) {
                                     showAdminMessage(
@@ -153,36 +213,44 @@ class _AdminWorkspaceManagementScreenState
                                   try {
                                     final savedWorkspace = isEditMode
                                         ? await AppDataService.updateWorkspace(
-                                          MockWorkspace(
-                                              id: workspace!.id,
+                                            MockWorkspace(
+                                              id: workspace.id,
                                               name: name,
                                               description: description,
-                                              memberCount: workspace!.memberCount,
-                                              projectCount: workspace!.projectCount,
+                                              memberCount:
+                                                  workspace.memberCount,
+                                              projectCount:
+                                                  workspace.projectCount,
                                               iconText: iconText.isEmpty
-                                                  ? workspace!.iconText
+                                                  ? workspace.iconText
                                                   : iconText,
                                             ),
                                           )
                                         : await AppDataService.createWorkspace(
                                             name: name,
                                             description: description,
-                                            iconText:
-                                                iconText.isEmpty ? 'WS' : iconText,
+                                            iconText: iconText.isEmpty
+                                                ? 'WS'
+                                                : iconText,
                                           );
 
-                                    if (!mounted) return;
-
-                                    Navigator.pop(bottomSheetContext);
-
-                                    await loadData();
-
-                                    if (!mounted) return;
-                                    showAdminMessage(
-                                      context,
-                                      isEditMode ? 'Đã cập nhật workspace' : 'Đã tạo workspace mới',
-                                    );
-
+                                    if (!mounted ||
+                                        !bottomSheetContext.mounted) {
+                                      return;
+                                    }
+                                    setState(() {
+                                      if (isEditMode) {
+                                        final index = workspaces.indexWhere(
+                                          (item) =>
+                                              item.id == savedWorkspace.id,
+                                        );
+                                        if (index != -1) {
+                                          workspaces[index] = savedWorkspace;
+                                        }
+                                      } else {
+                                        workspaces.add(savedWorkspace);
+                                      }
+                                    });
                                     Navigator.pop(bottomSheetContext);
                                     showAdminMessage(
                                       context,
@@ -191,7 +259,10 @@ class _AdminWorkspaceManagementScreenState
                                           : 'Đã tạo workspace mới',
                                     );
                                   } catch (error) {
-                                    if (!mounted) return;
+                                    if (!mounted ||
+                                        !bottomSheetContext.mounted) {
+                                      return;
+                                    }
                                     setSheetState(() {
                                       isSaving = false;
                                     });
@@ -210,8 +281,14 @@ class _AdminWorkspaceManagementScreenState
                                     color: Colors.white,
                                   ),
                                 )
-                              : Icon(isEditMode ? Icons.save_rounded : Icons.add_rounded),
-                          label: Text(isEditMode ? 'Lưu thay đổi' : 'Tạo workspace'),
+                              : Icon(
+                                  isEditMode
+                                      ? Icons.save_rounded
+                                      : Icons.add_rounded,
+                                ),
+                          label: Text(
+                            isEditMode ? 'Lưu thay đổi' : 'Tạo workspace',
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF7C3AED),
                             foregroundColor: Colors.white,
@@ -247,7 +324,9 @@ class _AdminWorkspaceManagementScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
           title: const Text('Xóa Workspace'),
           content: Text(
             projectCount > 0
@@ -423,6 +502,8 @@ class _AdminWorkspaceManagementScreenState
 
   @override
   Widget build(BuildContext context) {
+    final visibleWorkspaces = filteredWorkspaces;
+
     return AdminScreenScaffold(
       title: 'Quản lý Workspace',
       icon: Icons.workspaces_rounded,
@@ -478,28 +559,46 @@ class _AdminWorkspaceManagementScreenState
                       ],
                     ),
                     const SizedBox(height: 18),
+                    _WorkspaceFilterPanel(
+                      searchController: workspaceSearchController,
+                      selectedProjectCountFilter: selectedProjectCountFilter,
+                      selectedSort: selectedWorkspaceSort,
+                      onSearchChanged: (_) => setState(() {}),
+                      onProjectCountChanged: (value) {
+                        setState(() {
+                          selectedProjectCountFilter = value;
+                        });
+                      },
+                      onSortChanged: (value) {
+                        setState(() {
+                          selectedWorkspaceSort = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 18),
                     AdminSectionTitle(
                       title: 'Danh sách Workspace',
-                      countLabel: '${workspaces.length} workspace',
+                      countLabel: '${visibleWorkspaces.length} workspace',
                     ),
                     const SizedBox(height: 14),
-                    if (workspaces.isEmpty)
+                    if (visibleWorkspaces.isEmpty)
                       const AdminEmptyState(
                         icon: Icons.workspaces_outline,
-                        message: 'Chưa có workspace nào.',
+                        message: 'Không có workspace nào phù hợp bộ lọc.',
                       )
                     else
-                      ...workspaces.map((workspace) {
-                        final projectCount = projects
-                            .where((project) => project.workspaceId == workspace.id)
-                            .length;
+                      ...visibleWorkspaces.map((workspace) {
+                        final projectCount = getWorkspaceProjectCount(
+                          workspace.id,
+                        );
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: _WorkspaceAdminCard(
                             workspace: workspace,
                             projectCount: projectCount,
                             onView: () => showWorkspaceDetail(workspace),
-                            onEdit: () => openWorkspaceForm(workspace: workspace),
+                            onEdit: () =>
+                                openWorkspaceForm(workspace: workspace),
                             onDelete: () => deleteWorkspace(workspace),
                           ),
                         );
@@ -507,6 +606,93 @@ class _AdminWorkspaceManagementScreenState
                   ],
                 ),
               ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceFilterPanel extends StatelessWidget {
+  final TextEditingController searchController;
+  final String selectedProjectCountFilter;
+  final String selectedSort;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onProjectCountChanged;
+  final ValueChanged<String> onSortChanged;
+
+  const _WorkspaceFilterPanel({
+    required this.searchController,
+    required this.selectedProjectCountFilter,
+    required this.selectedSort,
+    required this.onSearchChanged,
+    required this.onProjectCountChanged,
+    required this.onSortChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AdminCard(
+      child: Column(
+        children: [
+          TextField(
+            controller: searchController,
+            onChanged: onSearchChanged,
+            decoration: adminInputDecoration(
+              label: 'Tìm workspace theo tên',
+              icon: Icons.search_rounded,
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedProjectCountFilter,
+            decoration: adminInputDecoration(
+              label: 'Lọc theo số project',
+              icon: Icons.filter_list_rounded,
+            ),
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('Tất cả số lượng')),
+              DropdownMenuItem(value: 'none', child: Text('Chưa có project')),
+              DropdownMenuItem(value: '1-3', child: Text('Từ 1 đến 3 project')),
+              DropdownMenuItem(
+                value: '4+',
+                child: Text('Từ 4 project trở lên'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) onProjectCountChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedSort,
+            decoration: adminInputDecoration(
+              label: 'Sắp xếp workspace',
+              icon: Icons.sort_by_alpha_rounded,
+            ),
+            items: const [
+              DropdownMenuItem(value: 'az', child: Text('Tên A → Z')),
+              DropdownMenuItem(value: 'za', child: Text('Tên Z → A')),
+              DropdownMenuItem(
+                value: 'projectsAsc',
+                child: Text('Số project tăng dần'),
+              ),
+              DropdownMenuItem(
+                value: 'projectsDesc',
+                child: Text('Số project giảm dần'),
+              ),
+              DropdownMenuItem(
+                value: 'membersAsc',
+                child: Text('Số thành viên tăng dần'),
+              ),
+              DropdownMenuItem(
+                value: 'membersDesc',
+                child: Text('Số thành viên giảm dần'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) onSortChanged(value);
+            },
+          ),
+        ],
       ),
     );
   }

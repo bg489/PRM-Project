@@ -10,6 +10,15 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const jwtSecret = process.env.JWT_SECRET || 'development-secret-change-me';
 const jwtTtlSeconds = Number(process.env.JWT_EXPIRES_IN_SECONDS || 604800);
+const registrationOtpTtlMinutes = Number(
+  process.env.REGISTRATION_OTP_TTL_MINUTES || 10,
+);
+const registrationMaxAttempts = Number(
+  process.env.REGISTRATION_MAX_ATTEMPTS || 5,
+);
+const appPublicUrl = String(
+  process.env.APP_PUBLIC_URL || `http://localhost:${port}`,
+).replace(/\/$/, '');
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
@@ -45,79 +54,44 @@ app.get('/api/health', asyncHandler(async (_req, res) => {
   res.json({ ok: true, service: 'productivity-management-backend' });
 }));
 
-app.post('/api/auth/register', asyncHandler(async (req, res) => {
-  const { email, password, fullName, avatarText } = req.body;
+app.post('/api/auth/register', asyncHandler(requestRegistrationVerification));
+app.post('/api/auth/register/request', asyncHandler(requestRegistrationVerification));
 
-  if (!email || !password || !fullName) {
-    throw httpError(400, 'Email, password and fullName are required.');
-  }
-
-  const normalizedEmail = email.trim().toLowerCase();
-
-  if (!normalizedEmail.includes('@')) {
-    throw httpError(400, 'Email is invalid.');
-  }
-
-  if (String(password).length < 6) {
-    throw httpError(400, 'Password must contain at least 6 characters.');
-  }
-
-  const existingUsers = await query(
-    'SELECT id FROM users WHERE email = ? LIMIT 1',
-    [normalizedEmail],
-  );
-
-  if (existingUsers.length > 0) {
-    throw httpError(409, 'Email already exists.');
-  }
-
-  const userId = makeId('u');
-  const role = 'Member';
-  const safeAvatar = (avatarText || initials(fullName))
-    .slice(0, 2)
-    .toUpperCase();
-
-  await execute(
-    `INSERT INTO users (id, email, password_hash, full_name, role, avatar_text)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      userId,
-      normalizedEmail,
-      hashPassword(password),
-      fullName.trim(),
-      role,
-      safeAvatar,
-    ],
-  );
-
-  const user = await getUserById(userId);
-  const token = signToken({ sub: user.id, role: user.role });
-
-  await execute(
-    `INSERT IGNORE INTO workspace_members (workspace_id, user_id, member_role)
-     SELECT id, ?, 'Member'
-     FROM workspaces`,
-    [user.id],
-  );
-
-  await execute(
-    `INSERT IGNORE INTO project_members (project_id, user_id)
-     SELECT p.id, ?
-     FROM projects p
-     JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
-     WHERE wm.user_id = ?`,
-    [user.id, user.id],
-  );
-
-  await insertActivity({
-    workspaceId: null,
-    userId: user.id,
-    actionType: 'LOGIN',
-    title: 'Đăng ký tài khoản',
-    description: `${user.fullName} đã đăng ký tài khoản mới.`,
+app.post('/api/auth/register/verify', asyncHandler(async (req, res) => {
+  const { verificationId, otp, token } = req.body;
+  const verification = await findRegistrationVerification({
+    verificationId,
+    token,
   });
 
-  res.status(201).json({ token, user });
+  await validateRegistrationVerification(verification, { otp, token });
+  const result = await completeRegistration(verification, { otp, token });
+  res.status(201).json(result);
+}));
+
+app.get('/api/auth/register/verify-link', asyncHandler(async (req, res) => {
+  const verification = await findRegistrationVerification({
+    token: req.query.token,
+  });
+
+  await validateRegistrationVerification(verification, {
+    token: req.query.token,
+  });
+  await completeRegistration(verification, {
+    token: req.query.token,
+  });
+
+  res
+    .status(200)
+    .type('html')
+    .send(`<!doctype html>
+<html lang="vi">
+  <head><meta charset="utf-8"><title>Xác thực thành công</title></head>
+  <body style="font-family:Arial,sans-serif;padding:40px;background:#f5f7fb;color:#111827">
+    <h1>Email đã được xác thực</h1>
+    <p>Tài khoản Productivity Manager đã được tạo. Bạn có thể quay lại ứng dụng và đăng nhập.</p>
+  </body>
+</html>`);
 }));
 
 app.post('/api/auth/login', asyncHandler(async (req, res) => {
@@ -225,9 +199,7 @@ app.post('/api/users/:id/change-password', asyncHandler(async (req, res) => {
   if (!verifyPassword(currentPassword || '', rows[0].password_hash)) {
     throw httpError(400, 'Current password is not correct.');
   }
-  if (!newPassword || newPassword.length < 6) {
-    throw httpError(400, 'New password must contain at least 6 characters.');
-  }
+  assertStrongPassword(newPassword, 'New password');
 
   await execute('UPDATE users SET password_hash = ? WHERE id = ?', [
     hashPassword(newPassword),
@@ -430,8 +402,12 @@ app.delete('/api/lists/:id', asyncHandler(async (req, res) => {
 
 app.get('/api/tasks', asyncHandler(async (req, res) => {
   const filters = {
+    workspaceId: req.query.workspaceId,
     projectId: req.query.projectId,
     assigneeId: req.query.assigneeId,
+    status: req.query.status,
+    priority: req.query.priority,
+    search: req.query.search,
   };
   const { sql, params } = taskSelectSql(filters);
   const rows = await query(sql, params);
@@ -863,8 +839,429 @@ async function execute(sql, params = []) {
   return result;
 }
 
+async function requestRegistrationVerification(req, res) {
+  const {
+    email,
+    password,
+    fullName,
+    avatarText,
+    verificationMethod = 'OTP',
+  } = req.body;
+
+  if (!email || !password || !fullName) {
+    throw httpError(400, 'Email, password and fullName are required.');
+  }
+
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const normalizedFullName = String(fullName).trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw httpError(400, 'Email is invalid.');
+  }
+  if (!normalizedFullName) {
+    throw httpError(400, 'fullName is required.');
+  }
+
+  assertStrongPassword(password);
+
+  const method = String(verificationMethod).trim().toUpperCase();
+  if (!['OTP', 'LINK', 'BOTH'].includes(method)) {
+    throw httpError(400, 'verificationMethod must be OTP, LINK or BOTH.');
+  }
+
+  const existingUsers = await query(
+    'SELECT id FROM users WHERE email = ? LIMIT 1',
+    [normalizedEmail],
+  );
+  if (existingUsers.length > 0) {
+    throw httpError(409, 'Email already exists.');
+  }
+
+  const verificationId = makeId('verify');
+  const otp = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const safeAvatar = String(avatarText || initials(normalizedFullName))
+    .trim()
+    .slice(0, 2)
+    .toUpperCase() || initials(normalizedFullName);
+  const expiresAt = new Date(
+    Date.now() + registrationOtpTtlMinutes * 60 * 1000,
+  );
+  const verificationLink =
+    `${appPublicUrl}/api/auth/register/verify-link?token=${encodeURIComponent(rawToken)}`;
+
+  await execute(
+    `DELETE FROM registration_verifications
+     WHERE email = ? OR expires_at < CURRENT_TIMESTAMP`,
+    [normalizedEmail],
+  );
+  await execute(
+    `INSERT INTO registration_verifications
+       (id, email, full_name, password_hash, avatar_text, verification_method,
+        otp_hash, verification_token_hash, attempts, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    [
+      verificationId,
+      normalizedEmail,
+      normalizedFullName,
+      hashPassword(password),
+      safeAvatar,
+      method,
+      method === 'LINK' ? null : hashVerificationValue(otp),
+      method === 'OTP' ? null : hashVerificationValue(rawToken),
+      expiresAt,
+    ],
+  );
+
+  const emailSent = await sendRegistrationVerificationEmail({
+    email: normalizedEmail,
+    fullName: normalizedFullName,
+    method,
+    otp,
+    verificationLink,
+  });
+
+  if (!emailSent) {
+    await execute('DELETE FROM registration_verifications WHERE id = ?', [
+      verificationId,
+    ]);
+    throw httpError(503, 'Verification email could not be delivered.');
+  }
+
+  const response = {
+    verificationId,
+    email: normalizedEmail,
+    verificationMethod: method,
+    expiresInSeconds: registrationOtpTtlMinutes * 60,
+    emailSent: true,
+  };
+
+  res.status(202).json(response);
+}
+
+async function findRegistrationVerification({ verificationId, token }) {
+  let rows;
+  if (verificationId) {
+    rows = await query(
+      'SELECT * FROM registration_verifications WHERE id = ? LIMIT 1',
+      [verificationId],
+    );
+  } else if (token) {
+    rows = await query(
+      `SELECT *
+       FROM registration_verifications
+       WHERE verification_token_hash = ?
+       LIMIT 1`,
+      [hashVerificationValue(token)],
+    );
+  } else {
+    throw httpError(400, 'verificationId or token is required.');
+  }
+
+  if (rows.length === 0) {
+    throw httpError(404, 'Registration verification was not found.');
+  }
+  return rows[0];
+}
+
+async function validateRegistrationVerification(
+  verification,
+  { otp, token },
+) {
+  if (new Date(verification.expires_at).getTime() < Date.now()) {
+    await execute('DELETE FROM registration_verifications WHERE id = ?', [
+      verification.id,
+    ]);
+    throw httpError(410, 'Verification code or link has expired.');
+  }
+
+  if (Number(verification.attempts) >= registrationMaxAttempts) {
+    throw httpError(429, 'Too many verification attempts. Request a new code.');
+  }
+
+  if (!hasValidRegistrationCredential(verification, { otp, token })) {
+    await execute(
+      `UPDATE registration_verifications
+       SET attempts = attempts + 1
+       WHERE id = ?`,
+      [verification.id],
+    );
+    throw httpError(400, 'Verification code or link is not valid.');
+  }
+}
+
+async function completeRegistration(verification, credentials) {
+  const connection = await pool.getConnection();
+  const userId = makeId('u');
+
+  try {
+    await connection.beginTransaction();
+
+    const [verificationRows] = await connection.execute(
+      `SELECT *
+       FROM registration_verifications
+       WHERE id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [verification.id],
+    );
+    if (verificationRows.length === 0) {
+      throw httpError(409, 'Registration verification was already used.');
+    }
+
+    const lockedVerification = verificationRows[0];
+    if (new Date(lockedVerification.expires_at).getTime() < Date.now()) {
+      throw httpError(410, 'Verification code or link has expired.');
+    }
+    if (!hasValidRegistrationCredential(lockedVerification, credentials)) {
+      throw httpError(400, 'Verification code or link is not valid.');
+    }
+
+    const [existingUsers] = await connection.execute(
+      'SELECT id FROM users WHERE email = ? LIMIT 1',
+      [lockedVerification.email],
+    );
+    if (existingUsers.length > 0) {
+      throw httpError(409, 'Email already exists.');
+    }
+
+    await connection.execute(
+      `INSERT INTO users
+         (id, email, password_hash, full_name, role, avatar_text)
+       VALUES (?, ?, ?, ?, 'Member', ?)`,
+      [
+        userId,
+        lockedVerification.email,
+        lockedVerification.password_hash,
+        lockedVerification.full_name,
+        lockedVerification.avatar_text,
+      ],
+    );
+    await connection.execute(
+      `INSERT IGNORE INTO workspace_members
+         (workspace_id, user_id, member_role)
+       SELECT id, ?, 'Member'
+       FROM workspaces`,
+      [userId],
+    );
+    await connection.execute(
+      `INSERT IGNORE INTO project_members (project_id, user_id)
+       SELECT p.id, ?
+       FROM projects p
+       JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+       WHERE wm.user_id = ?`,
+      [userId, userId],
+    );
+    await connection.execute(
+      'DELETE FROM registration_verifications WHERE id = ?',
+      [lockedVerification.id],
+    );
+    await connection.execute(
+      `INSERT INTO activity_logs
+         (id, workspace_id, user_id, action_type, title, description)
+       VALUES (?, NULL, ?, 'REGISTER', ?, ?)`,
+      [
+        makeId('log'),
+        userId,
+        'Đăng ký tài khoản',
+        `${lockedVerification.full_name} đã xác thực email và đăng ký tài khoản mới.`,
+      ],
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+
+  const user = await getUserById(userId);
+  const token = signToken({ sub: user.id, role: user.role });
+
+  return { token, user };
+}
+
+async function sendRegistrationVerificationEmail({
+  email,
+  fullName,
+  method,
+  otp,
+  verificationLink,
+}) {
+  if (!process.env.SMTP_HOST) {
+    console.error('SMTP_HOST is not configured; verification email was not sent.');
+    return false;
+  }
+
+  try {
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: process.env.SMTP_USER
+        ? {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASSWORD || '',
+          }
+        : undefined,
+    });
+
+    const safeFullName = escapeHtml(fullName);
+    const safeOtp = escapeHtml(otp);
+    const safeVerificationLink = escapeHtml(verificationLink);
+    const otpBlock = method === 'LINK'
+      ? ''
+      : `
+        <tr>
+          <td style="padding:0 32px 24px">
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:18px;padding:22px;text-align:center">
+              <div style="color:#6d28d9;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">
+                Mã xác thực của bạn
+              </div>
+              <div style="color:#111827;font-size:34px;font-weight:800;letter-spacing:9px;padding-top:12px">
+                ${safeOtp}
+              </div>
+            </div>
+          </td>
+        </tr>`;
+    const linkBlock = method === 'OTP'
+      ? ''
+      : `
+        <tr>
+          <td style="padding:0 32px 24px;text-align:center">
+            <a href="${safeVerificationLink}"
+               style="display:inline-block;background:#7c3aed;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:15px 28px;border-radius:12px">
+              Xác thực tài khoản
+            </a>
+          </td>
+        </tr>`;
+    const textContent = method === 'OTP'
+      ? `Xin chào ${fullName}. OTP của bạn là ${otp}.`
+      : method === 'LINK'
+        ? `Xin chào ${fullName}. Link xác thực: ${verificationLink}`
+        : `Xin chào ${fullName}. OTP: ${otp}. Link xác thực: ${verificationLink}`;
+
+    await transporter.sendMail({
+      from:
+        process.env.EMAIL_FROM ||
+        'Productivity Manager <no-reply@example.com>',
+      to: email,
+      subject: 'Xác thực đăng ký Productivity Manager',
+      text: textContent,
+      html: `<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Xác thực đăng ký</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;color:#111827">
+    <div style="display:none;max-height:0;overflow:hidden;color:transparent">
+      Hoàn tất xác thực tài khoản Productivity Manager của bạn.
+    </div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6">
+      <tr>
+        <td align="center" style="padding:32px 16px">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                 style="max-width:600px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 16px 40px rgba(17,24,39,.12)">
+            <tr>
+              <td style="background:#6d28d9;padding:30px 32px">
+                <div style="color:#ddd6fe;font-size:13px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">
+                  Productivity Manager
+                </div>
+                <div style="color:#ffffff;font-size:27px;font-weight:800;padding-top:8px">
+                  Xác thực email đăng ký
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:30px 32px 18px">
+                <div style="font-size:19px;font-weight:800">Xin chào ${safeFullName},</div>
+                <p style="margin:12px 0 0;color:#4b5563;font-size:15px;line-height:1.65">
+                  Cảm ơn bạn đã đăng ký. Hãy hoàn tất bước xác thực bên dưới để bắt đầu quản lý workspace, project và task.
+                </p>
+              </td>
+            </tr>
+            ${otpBlock}
+            ${linkBlock}
+            <tr>
+              <td style="padding:0 32px 28px">
+                <div style="background:#eff6ff;border-radius:14px;padding:16px;color:#1e3a8a;font-size:13px;line-height:1.55">
+                  Mã hoặc liên kết sẽ hết hạn sau <strong>${registrationOtpTtlMinutes} phút</strong>.
+                  Nếu bạn không thực hiện đăng ký này, hãy bỏ qua email.
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="border-top:1px solid #e5e7eb;padding:20px 32px;color:#9ca3af;font-size:12px;line-height:1.5;text-align:center">
+                Email tự động từ Productivity Manager. Vui lòng không trả lời email này.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
+    });
+    return true;
+  } catch (error) {
+    console.error('Could not send registration verification email.', error);
+    return false;
+  }
+}
+
+function hashVerificationValue(value) {
+  return crypto
+    .createHash('sha256')
+    .update(String(value || ''))
+    .digest('hex');
+}
+
+function safeHashEquals(value, expectedHash) {
+  const candidate = Buffer.from(hashVerificationValue(value), 'hex');
+  const expected = Buffer.from(String(expectedHash || ''), 'hex');
+  return candidate.length === expected.length &&
+    crypto.timingSafeEqual(candidate, expected);
+}
+
+function hasValidRegistrationCredential(verification, { otp, token } = {}) {
+  const validOtp =
+    Boolean(otp) &&
+    Boolean(verification.otp_hash) &&
+    safeHashEquals(otp, verification.otp_hash);
+  const validToken =
+    Boolean(token) &&
+    Boolean(verification.verification_token_hash) &&
+    safeHashEquals(token, verification.verification_token_hash);
+  return validOtp || validToken;
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
 function makeId(prefix) {
   return `${prefix}${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}`;
+}
+
+function assertStrongPassword(password, label = 'Password') {
+  const value = String(password || '');
+  if (value.length < 6) {
+    throw httpError(400, `${label} must contain at least 6 characters.`);
+  }
+  if (!/[A-Z]/.test(value)) {
+    throw httpError(400, `${label} must contain at least one uppercase letter.`);
+  }
+  if (!/[^A-Za-z0-9]/.test(value)) {
+    throw httpError(400, `${label} must contain at least one special character.`);
+  }
 }
 
 function hashPassword(password) {
@@ -1308,9 +1705,26 @@ function taskSelectSql(filters = {}) {
     conditions.push('t.project_id = ?');
     params.push(filters.projectId);
   }
+  if (filters.workspaceId) {
+    conditions.push('p.workspace_id = ?');
+    params.push(filters.workspaceId);
+  }
   if (filters.assigneeId) {
     conditions.push('t.assignee_id = ?');
     params.push(filters.assigneeId);
+  }
+  if (filters.status) {
+    conditions.push('l.name = ?');
+    params.push(filters.status);
+  }
+  if (filters.priority) {
+    conditions.push('t.priority = ?');
+    params.push(filters.priority);
+  }
+  if (filters.search) {
+    conditions.push('(t.title LIKE ? OR t.description LIKE ?)');
+    const pattern = `%${String(filters.search).trim()}%`;
+    params.push(pattern, pattern);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -1327,6 +1741,7 @@ function taskSelectSql(filters = {}) {
         COALESCE(cm.comment_count, 0) AS comment_count
       FROM tasks t
       JOIN task_lists l ON l.id = t.list_id
+      JOIN projects p ON p.id = t.project_id
       LEFT JOIN users u ON u.id = t.assignee_id
       LEFT JOIN (
         SELECT task_id, COUNT(*) AS checklist_total, SUM(is_completed = TRUE) AS checklist_done

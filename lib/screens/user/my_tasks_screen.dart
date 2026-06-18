@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/mock_tasks.dart';
 import '../../data/mock_users.dart';
+import '../../data/mock_workspaces.dart';
 import '../../services/app_data_service.dart';
 import '../task/task_detail_screen.dart';
 import 'user_approval_requests_screen.dart';
@@ -9,10 +10,7 @@ import 'user_approval_requests_screen.dart';
 class MyTasksScreen extends StatefulWidget {
   final MockUser user;
 
-  const MyTasksScreen({
-    super.key,
-    required this.user,
-  });
+  const MyTasksScreen({super.key, required this.user});
 
   @override
   State<MyTasksScreen> createState() => _MyTasksScreenState();
@@ -20,6 +18,11 @@ class MyTasksScreen extends StatefulWidget {
 
 class _MyTasksScreenState extends State<MyTasksScreen> {
   List<MockTask> myTasks = const [];
+  List<MockWorkspace> workspaces = const [];
+  List<MockProject> projects = const [];
+  final TextEditingController taskSearchController = TextEditingController();
+  String selectedWorkspace = 'all';
+  String selectedProject = 'all';
   String selectedStatus = 'all';
   String selectedPriority = 'all';
   bool isLoading = true;
@@ -32,11 +35,15 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
 
   Future<void> loadMyTasks() async {
     try {
+      final fetchedWorkspaces = await AppDataService.fetchWorkspaces();
+      final fetchedProjects = await AppDataService.fetchProjects();
       final fetchedTasks = await AppDataService.fetchTasks(
         assigneeId: widget.user.id,
       );
       if (!mounted) return;
       setState(() {
+        workspaces = fetchedWorkspaces;
+        projects = fetchedProjects;
         myTasks = fetchedTasks;
         isLoading = false;
       });
@@ -47,9 +54,14 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
       }).toList();
       if (!mounted) return;
       setState(() {
+        workspaces = List.from(mockWorkspaces);
+        projects = List.from(mockProjects);
         myTasks = assignedTasks.isNotEmpty
             ? assignedTasks
-            : mockTasks.where((task) => task.status != 'Đã xong').take(5).toList();
+            : mockTasks
+                  .where((task) => task.status != 'Đã xong')
+                  .take(5)
+                  .toList();
         isLoading = false;
       });
     }
@@ -57,11 +69,32 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
 
   List<MockTask> get filteredTasks {
     return myTasks.where((task) {
+      final projectIndex = projects.indexWhere(
+        (project) => project.id == task.projectId,
+      );
+      final project = projectIndex == -1 ? null : projects[projectIndex];
+      final workspaceOk =
+          selectedWorkspace == 'all' ||
+          project?.workspaceId == selectedWorkspace;
+      final projectOk =
+          selectedProject == 'all' || task.projectId == selectedProject;
       final statusOk = selectedStatus == 'all' || task.status == selectedStatus;
       final priorityOk =
           selectedPriority == 'all' || task.priority == selectedPriority;
-      return statusOk && priorityOk;
+      final search = taskSearchController.text.trim().toLowerCase();
+      final searchOk =
+          search.isEmpty ||
+          task.title.toLowerCase().contains(search) ||
+          task.description.toLowerCase().contains(search);
+      return workspaceOk && projectOk && statusOk && priorityOk && searchOk;
     }).toList();
+  }
+
+  List<MockProject> get workspaceProjects {
+    if (selectedWorkspace == 'all') return projects;
+    return projects
+        .where((project) => project.workspaceId == selectedWorkspace)
+        .toList();
   }
 
   int get completedTasks {
@@ -96,24 +129,24 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    taskSearchController.dispose();
+    super.dispose();
+  }
+
   void openTaskDetail(MockTask task) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => TaskDetailScreen(
-          task: task,
-          currentUser: widget.user,
-        ),
+        builder: (_) => TaskDetailScreen(task: task, currentUser: widget.user),
       ),
     );
   }
 
   void showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -156,13 +189,34 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
             _StatsCard(
               totalTasks: myTasks.length,
               completedTasks: completedTasks,
-              highPriorityTasks:
-                  myTasks.where((task) => task.priority == 'High').length,
+              highPriorityTasks: myTasks
+                  .where((task) => task.priority == 'High')
+                  .length,
             ),
             const SizedBox(height: 16),
             _FilterCard(
+              workspaces: workspaces,
+              projects: workspaceProjects,
+              taskSearchController: taskSearchController,
+              selectedWorkspace: selectedWorkspace,
+              selectedProject: selectedProject,
               selectedStatus: selectedStatus,
               selectedPriority: selectedPriority,
+              onWorkspaceChanged: (value) {
+                setState(() {
+                  selectedWorkspace = value;
+                  if (!workspaceProjects.any(
+                    (project) => project.id == selectedProject,
+                  )) {
+                    selectedProject = 'all';
+                  }
+                });
+              },
+              onProjectChanged: (value) {
+                setState(() {
+                  selectedProject = value;
+                });
+              },
               onStatusChanged: (value) {
                 setState(() {
                   selectedStatus = value;
@@ -173,6 +227,7 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
                   selectedPriority = value;
                 });
               },
+              onSearchChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 18),
             Row(
@@ -245,10 +300,7 @@ class _StatItem extends StatelessWidget {
   final String label;
   final int value;
 
-  const _StatItem({
-    required this.label,
-    required this.value,
-  });
+  const _StatItem({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -277,16 +329,32 @@ class _StatItem extends StatelessWidget {
 }
 
 class _FilterCard extends StatelessWidget {
+  final List<MockWorkspace> workspaces;
+  final List<MockProject> projects;
+  final TextEditingController taskSearchController;
+  final String selectedWorkspace;
+  final String selectedProject;
   final String selectedStatus;
   final String selectedPriority;
+  final ValueChanged<String> onWorkspaceChanged;
+  final ValueChanged<String> onProjectChanged;
   final ValueChanged<String> onStatusChanged;
   final ValueChanged<String> onPriorityChanged;
+  final ValueChanged<String> onSearchChanged;
 
   const _FilterCard({
+    required this.workspaces,
+    required this.projects,
+    required this.taskSearchController,
+    required this.selectedWorkspace,
+    required this.selectedProject,
     required this.selectedStatus,
     required this.selectedPriority,
+    required this.onWorkspaceChanged,
+    required this.onProjectChanged,
     required this.onStatusChanged,
     required this.onPriorityChanged,
+    required this.onSearchChanged,
   });
 
   @override
@@ -296,6 +364,54 @@ class _FilterCard extends StatelessWidget {
       decoration: _cardDecoration(),
       child: Column(
         children: [
+          DropdownButtonFormField<String>(
+            value: selectedWorkspace,
+            decoration: _inputDecoration('Workspace'),
+            items: [
+              const DropdownMenuItem(
+                value: 'all',
+                child: Text('Tất cả workspace'),
+              ),
+              ...workspaces.map((workspace) {
+                return DropdownMenuItem(
+                  value: workspace.id,
+                  child: Text(workspace.name),
+                );
+              }),
+            ],
+            onChanged: (value) {
+              if (value != null) onWorkspaceChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedProject,
+            decoration: _inputDecoration('Project'),
+            items: [
+              const DropdownMenuItem(
+                value: 'all',
+                child: Text('Tất cả project'),
+              ),
+              ...projects.map((project) {
+                return DropdownMenuItem(
+                  value: project.id,
+                  child: Text(project.name),
+                );
+              }),
+            ],
+            onChanged: (value) {
+              if (value != null) onProjectChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: taskSearchController,
+            onChanged: onSearchChanged,
+            decoration: _inputDecoration(
+              'Tìm task trong project',
+            ).copyWith(prefixIcon: const Icon(Icons.search_rounded)),
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: selectedStatus,
             decoration: _inputDecoration('Trạng thái'),
@@ -354,8 +470,9 @@ class _TaskTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress =
-        task.checklistTotal == 0 ? 0.0 : task.checklistDone / task.checklistTotal;
+    final progress = task.checklistTotal == 0
+        ? 0.0
+        : task.checklistDone / task.checklistTotal;
 
     return InkWell(
       onTap: onTap,
