@@ -3,14 +3,12 @@ import '../../data/mock_tasks.dart';
 import '../../data/mock_workspaces.dart';
 import '../task/task_detail_screen.dart';
 import '../task/create_edit_task_screen.dart';
-import '../calendar/calendar_view_screen.dart';
-import '../analytics/productivity_analytics_screen.dart';
 import '../../data/mock_users.dart';
-import '../profile/profile_settings_screen.dart';
 import 'board_configuration_screen.dart';
 import '../approval/requirements_approval_screen.dart';
 import '../../utils/app_navigation.dart';
 import '../../utils/role_permissions.dart';
+import '../../utils/search_utils.dart';
 import '../../services/app_data_service.dart';
 
 class ProjectBoardScreen extends StatefulWidget {
@@ -30,6 +28,12 @@ class ProjectBoardScreen extends StatefulWidget {
 class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
   late List<MockTask> tasks;
   late List<String> boardColumns;
+  final TextEditingController taskSearchController = TextEditingController();
+  String selectedStatusFilter = 'all';
+  String selectedPriorityFilter = 'all';
+  String selectedChecklistCountFilter = 'all';
+  String selectedCommentCountFilter = 'all';
+  String selectedTaskSort = 'az';
   bool isLoading = true;
   int waitingApprovalCount = 0;
 
@@ -43,7 +47,9 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
 
   Future<void> loadTasks() async {
     try {
-      final fetchedLists = await AppDataService.fetchTaskLists(widget.project.id);
+      final fetchedLists = await AppDataService.fetchTaskLists(
+        widget.project.id,
+      );
       final fetchedTasks = await AppDataService.fetchTasks(
         projectId: widget.project.id,
       );
@@ -55,10 +61,15 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
       if (!mounted) return;
 
       setState(() {
-        tasks = fetchedTasks;
-        boardColumns = fetchedLists.isEmpty
+        final nextColumns = fetchedLists.isEmpty
             ? List<String>.from(kanbanColumns)
             : fetchedLists.map((list) => list.name).toList();
+        tasks = fetchedTasks;
+        boardColumns = nextColumns;
+        if (selectedStatusFilter != 'all' &&
+            !nextColumns.contains(selectedStatusFilter)) {
+          selectedStatusFilter = 'all';
+        }
         waitingApprovalCount = approvalRequests.length;
         isLoading = false;
       });
@@ -68,10 +79,74 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
       setState(() {
         tasks = getTasksByProject(widget.project.id);
         boardColumns = List<String>.from(kanbanColumns);
+        if (selectedStatusFilter != 'all' &&
+            !boardColumns.contains(selectedStatusFilter)) {
+          selectedStatusFilter = 'all';
+        }
         waitingApprovalCount = 0;
         isLoading = false;
       });
     }
+  }
+
+  List<MockTask> get filteredTasks {
+    final search = normalizeSearchText(taskSearchController.text);
+    final result = tasks.where((task) {
+      final matchesStatus =
+          selectedStatusFilter == 'all' || task.status == selectedStatusFilter;
+      final matchesPriority =
+          selectedPriorityFilter == 'all' ||
+          task.priority == selectedPriorityFilter;
+      final matchesSearch =
+          search.isEmpty ||
+          normalizeSearchText(task.title).contains(search) ||
+          normalizeSearchText(task.description).contains(search) ||
+          normalizeSearchText(task.assigneeName).contains(search);
+      final matchesChecklistCount = switch (selectedChecklistCountFilter) {
+        'none' => task.checklistTotal == 0,
+        '1-5' => task.checklistTotal >= 1 && task.checklistTotal <= 5,
+        '6+' => task.checklistTotal >= 6,
+        _ => true,
+      };
+      final matchesCommentCount = switch (selectedCommentCountFilter) {
+        'none' => task.commentCount == 0,
+        '1-3' => task.commentCount >= 1 && task.commentCount <= 3,
+        '4+' => task.commentCount >= 4,
+        _ => true,
+      };
+
+      return matchesStatus &&
+          matchesPriority &&
+          matchesSearch &&
+          matchesChecklistCount &&
+          matchesCommentCount;
+    }).toList();
+
+    result.sort((first, second) {
+      return switch (selectedTaskSort) {
+        'za' => normalizeSearchText(
+          second.title,
+        ).compareTo(normalizeSearchText(first.title)),
+        'checklistAsc' => first.checklistTotal.compareTo(second.checklistTotal),
+        'checklistDesc' => second.checklistTotal.compareTo(
+          first.checklistTotal,
+        ),
+        'commentsAsc' => first.commentCount.compareTo(second.commentCount),
+        'commentsDesc' => second.commentCount.compareTo(first.commentCount),
+        _ => normalizeSearchText(
+          first.title,
+        ).compareTo(normalizeSearchText(second.title)),
+      };
+    });
+
+    return result;
+  }
+
+  List<String> get visibleBoardColumns {
+    if (selectedStatusFilter == 'all') return boardColumns;
+    return boardColumns
+        .where((column) => column == selectedStatusFilter)
+        .toList();
   }
 
   Future<void> moveTaskToColumn(MockTask task, String newStatus) async {
@@ -127,10 +202,7 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => TaskDetailScreen(
-          task: task,
-          currentUser: widget.user,
-        ),
+        builder: (_) => TaskDetailScreen(task: task, currentUser: widget.user),
       ),
     );
   }
@@ -139,9 +211,7 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
     final newTask = await Navigator.push<MockTask>(
       context,
       MaterialPageRoute(
-        builder: (_) => CreateEditTaskScreen(
-          projectId: widget.project.id,
-        ),
+        builder: (_) => CreateEditTaskScreen(projectId: widget.project.id),
       ),
     );
 
@@ -190,10 +260,8 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => BoardConfigurationScreen(
-          project: widget.project,
-          tasks: tasks,
-        ),
+        builder: (_) =>
+            BoardConfigurationScreen(project: widget.project, tasks: tasks),
       ),
     ).then((_) => loadTasks());
   }
@@ -202,12 +270,16 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => RequirementsApprovalScreen(
-          project: widget.project,
-          tasks: tasks,
-        ),
+        builder: (_) =>
+            RequirementsApprovalScreen(project: widget.project, tasks: tasks),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    taskSearchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -220,18 +292,22 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
     }
 
     final totalTasks = tasks.length;
-    final doneColumn = boardColumns.isEmpty ? kanbanColumns.last : boardColumns.last;
+    final doneColumn = boardColumns.isEmpty
+        ? kanbanColumns.last
+        : boardColumns.last;
     final doneTasks = tasks.where((task) => task.status == doneColumn).length;
+    final visibleTasks = filteredTasks;
+    final visibleColumns = visibleBoardColumns;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       floatingActionButton: RolePermissions.canCreateTask(widget.user)
           ? FloatingActionButton(
-        onPressed: openCreateTaskScreen,
-        backgroundColor: const Color(0xFF7C3AED),
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add_rounded, size: 30),
-      )
+              onPressed: openCreateTaskScreen,
+              backgroundColor: const Color(0xFF7C3AED),
+              foregroundColor: Colors.white,
+              child: const Icon(Icons.add_rounded, size: 30),
+            )
           : null,
       bottomNavigationBar: _BoardBottomNavBar(
         onCalendarTap: openCalendarScreen,
@@ -250,7 +326,9 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
               onSettingsTap: openBoardConfigurationScreen,
               onApprovalTap: openRequirementsApprovalScreen,
               canConfigureBoard: RolePermissions.canManageBoard(widget.user),
-              canApproveRequirements: RolePermissions.canApproveRequirements(widget.user),
+              canApproveRequirements: RolePermissions.canApproveRequirements(
+                widget.user,
+              ),
               approvalCount: waitingApprovalCount,
             ),
             const SizedBox(height: 16),
@@ -302,111 +380,514 @@ class _ProjectBoardScreenState extends State<ProjectBoardScreen> {
 
             const SizedBox(height: 14),
 
-            Expanded(
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 90),
-                itemCount: boardColumns.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 16),
-                itemBuilder: (context, index) {
-                  final columnName = boardColumns[index];
-                  final columnTasks =
-                  tasks.where((task) => task.status == columnName).toList();
-
-                  return DragTarget<MockTask>(
-                    onWillAcceptWithDetails: (details) => true,
-                    onAcceptWithDetails: (details) {
-                      moveTaskToColumn(details.data, columnName);
-                    },
-                    builder: (context, candidateData, rejectedData) {
-                      final isHovering = candidateData.isNotEmpty;
-
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        width: 310,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: isHovering
-                              ? const Color(0xFFEDE9FE)
-                              : Colors.white,
-                          borderRadius: BorderRadius.circular(26),
-                          border: Border.all(
-                            color: isHovering
-                                ? const Color(0xFF7C3AED)
-                                : const Color(0xFFE5E7EB),
-                            width: 1.3,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.06),
-                              blurRadius: 18,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _ColumnHeader(
-                              title: columnName,
-                              count: columnTasks.length,
-                              index: index,
-                            ),
-                            const SizedBox(height: 14),
-
-                            Expanded(
-                              child: columnTasks.isEmpty
-                                  ? _EmptyColumn(columnName: columnName)
-                                  : ListView.separated(
-                                itemCount: columnTasks.length,
-                                separatorBuilder: (_, __) =>
-                                const SizedBox(height: 12),
-                                itemBuilder: (context, taskIndex) {
-                                  final task = columnTasks[taskIndex];
-
-                                  final taskWidget = GestureDetector(
-                                    onTap: () => openTaskDetail(task),
-                                    child: _TaskCard(task: task),
-                                  );
-
-                                  if (!RolePermissions.canManageBoard(widget.user)) {
-                                    return taskWidget;
-                                  }
-
-                                  return LongPressDraggable<MockTask>(
-                                    data: task,
-                                    feedback: Material(
-                                      color: Colors.transparent,
-                                      child: SizedBox(
-                                        width: 280,
-                                        child: _TaskCard(
-                                          task: task,
-                                          isDragging: true,
-                                        ),
-                                      ),
-                                    ),
-                                    childWhenDragging: Opacity(
-                                      opacity: 0.35,
-                                      child: _TaskCard(task: task),
-                                    ),
-                                    child: taskWidget,
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: _BoardFilterCard(
+                taskSearchController: taskSearchController,
+                selectedStatus: selectedStatusFilter,
+                selectedPriority: selectedPriorityFilter,
+                selectedChecklistCount: selectedChecklistCountFilter,
+                selectedCommentCount: selectedCommentCountFilter,
+                selectedSort: selectedTaskSort,
+                boardColumns: boardColumns,
+                visibleCount: visibleTasks.length,
+                totalCount: tasks.length,
+                onSearchChanged: (_) => setState(() {}),
+                onStatusChanged: (value) {
+                  setState(() {
+                    selectedStatusFilter = value;
+                  });
+                },
+                onPriorityChanged: (value) {
+                  setState(() {
+                    selectedPriorityFilter = value;
+                  });
+                },
+                onChecklistCountChanged: (value) {
+                  setState(() {
+                    selectedChecklistCountFilter = value;
+                  });
+                },
+                onCommentCountChanged: (value) {
+                  setState(() {
+                    selectedCommentCountFilter = value;
+                  });
+                },
+                onSortChanged: (value) {
+                  setState(() {
+                    selectedTaskSort = value;
+                  });
                 },
               ),
+            ),
+
+            const SizedBox(height: 14),
+
+            Expanded(
+              child: visibleColumns.isEmpty
+                  ? const _BoardEmptyState(
+                      message: 'Không có trạng thái phù hợp bộ lọc.',
+                    )
+                  : ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                      itemCount: visibleColumns.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 16),
+                      itemBuilder: (context, index) {
+                        final columnName = visibleColumns[index];
+                        final columnTasks = visibleTasks
+                            .where((task) => task.status == columnName)
+                            .toList();
+
+                        return DragTarget<MockTask>(
+                          onWillAcceptWithDetails: (details) => true,
+                          onAcceptWithDetails: (details) {
+                            moveTaskToColumn(details.data, columnName);
+                          },
+                          builder: (context, candidateData, rejectedData) {
+                            final isHovering = candidateData.isNotEmpty;
+
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              width: 340,
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: isHovering
+                                    ? const Color(0xFFEDE9FE)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(26),
+                                border: Border.all(
+                                  color: isHovering
+                                      ? const Color(0xFF7C3AED)
+                                      : const Color(0xFFE5E7EB),
+                                  width: 1.3,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.06),
+                                    blurRadius: 18,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _ColumnHeader(
+                                    title: columnName,
+                                    count: columnTasks.length,
+                                    index: index,
+                                  ),
+                                  const SizedBox(height: 14),
+
+                                  Expanded(
+                                    child: columnTasks.isEmpty
+                                        ? _EmptyColumn(columnName: columnName)
+                                        : ListView.separated(
+                                            itemCount: columnTasks.length,
+                                            separatorBuilder: (_, __) =>
+                                                const SizedBox(height: 12),
+                                            itemBuilder: (context, taskIndex) {
+                                              final task =
+                                                  columnTasks[taskIndex];
+
+                                              final taskWidget =
+                                                  GestureDetector(
+                                                    onTap: () =>
+                                                        openTaskDetail(task),
+                                                    child: _TaskCard(
+                                                      task: task,
+                                                    ),
+                                                  );
+
+                                              if (!RolePermissions.canManageBoard(
+                                                widget.user,
+                                              )) {
+                                                return taskWidget;
+                                              }
+
+                                              return LongPressDraggable<
+                                                MockTask
+                                              >(
+                                                data: task,
+                                                feedback: Material(
+                                                  color: Colors.transparent,
+                                                  child: SizedBox(
+                                                    width: 280,
+                                                    child: _TaskCard(
+                                                      task: task,
+                                                      isDragging: true,
+                                                    ),
+                                                  ),
+                                                ),
+                                                childWhenDragging: Opacity(
+                                                  opacity: 0.35,
+                                                  child: _TaskCard(task: task),
+                                                ),
+                                                child: taskWidget,
+                                              );
+                                            },
+                                          ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+class _BoardFilterCard extends StatelessWidget {
+  final TextEditingController taskSearchController;
+  final String selectedStatus;
+  final String selectedPriority;
+  final String selectedChecklistCount;
+  final String selectedCommentCount;
+  final String selectedSort;
+  final List<String> boardColumns;
+  final int visibleCount;
+  final int totalCount;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onStatusChanged;
+  final ValueChanged<String> onPriorityChanged;
+  final ValueChanged<String> onChecklistCountChanged;
+  final ValueChanged<String> onCommentCountChanged;
+  final ValueChanged<String> onSortChanged;
+
+  const _BoardFilterCard({
+    required this.taskSearchController,
+    required this.selectedStatus,
+    required this.selectedPriority,
+    required this.selectedChecklistCount,
+    required this.selectedCommentCount,
+    required this.selectedSort,
+    required this.boardColumns,
+    required this.visibleCount,
+    required this.totalCount,
+    required this.onSearchChanged,
+    required this.onStatusChanged,
+    required this.onPriorityChanged,
+    required this.onChecklistCountChanged,
+    required this.onCommentCountChanged,
+    required this.onSortChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.055),
+            blurRadius: 16,
+            offset: const Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Lọc task trong project',
+                  style: TextStyle(
+                    color: Color(0xFF111827),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEDE9FE),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$visibleCount/$totalCount task',
+                  style: const TextStyle(
+                    color: Color(0xFF6D28D9),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: taskSearchController,
+            onChanged: onSearchChanged,
+            decoration: _boardInputDecoration(
+              'Tìm task theo tên',
+              icon: Icons.search_rounded,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _BoardFilterDropdown(
+                  width: 150,
+                  label: 'Trạng thái',
+                  value: selectedStatus,
+                  options: [
+                    const _BoardFilterOption(value: 'all', label: 'Tất cả'),
+                    ...boardColumns.map(
+                      (status) =>
+                          _BoardFilterOption(value: status, label: status),
+                    ),
+                  ],
+                  onChanged: onStatusChanged,
+                ),
+                const SizedBox(width: 10),
+                _BoardFilterDropdown(
+                  width: 140,
+                  label: 'Ưu tiên',
+                  value: selectedPriority,
+                  options: const [
+                    _BoardFilterOption(value: 'all', label: 'Tất cả'),
+                    _BoardFilterOption(value: 'High', label: 'Cao'),
+                    _BoardFilterOption(value: 'Medium', label: 'Trung bình'),
+                    _BoardFilterOption(value: 'Low', label: 'Thấp'),
+                  ],
+                  onChanged: onPriorityChanged,
+                ),
+                const SizedBox(width: 10),
+                _BoardFilterDropdown(
+                  width: 150,
+                  label: 'Checklist',
+                  value: selectedChecklistCount,
+                  options: const [
+                    _BoardFilterOption(value: 'all', label: 'Tất cả'),
+                    _BoardFilterOption(value: 'none', label: '0 item'),
+                    _BoardFilterOption(value: '1-5', label: '1 - 5 item'),
+                    _BoardFilterOption(value: '6+', label: 'Từ 6 item'),
+                  ],
+                  onChanged: onChecklistCountChanged,
+                ),
+                const SizedBox(width: 10),
+                _BoardFilterDropdown(
+                  width: 150,
+                  label: 'Bình luận',
+                  value: selectedCommentCount,
+                  options: const [
+                    _BoardFilterOption(value: 'all', label: 'Tất cả'),
+                    _BoardFilterOption(value: 'none', label: '0 comment'),
+                    _BoardFilterOption(value: '1-3', label: '1 - 3'),
+                    _BoardFilterOption(value: '4+', label: 'Từ 4'),
+                  ],
+                  onChanged: onCommentCountChanged,
+                ),
+                const SizedBox(width: 10),
+                _BoardFilterDropdown(
+                  width: 210,
+                  label: 'Sắp xếp',
+                  value: selectedSort,
+                  options: const [
+                    _BoardFilterOption(value: 'az', label: 'Tên A - Z'),
+                    _BoardFilterOption(value: 'za', label: 'Tên Z - A'),
+                    _BoardFilterOption(
+                      value: 'checklistAsc',
+                      label: 'Ít checklist trước',
+                    ),
+                    _BoardFilterOption(
+                      value: 'checklistDesc',
+                      label: 'Nhiều checklist trước',
+                    ),
+                    _BoardFilterOption(
+                      value: 'commentsAsc',
+                      label: 'Ít bình luận trước',
+                    ),
+                    _BoardFilterOption(
+                      value: 'commentsDesc',
+                      label: 'Nhiều bình luận trước',
+                    ),
+                  ],
+                  onChanged: onSortChanged,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BoardFilterOption {
+  final String value;
+  final String label;
+
+  const _BoardFilterOption({required this.value, required this.label});
+}
+
+class _BoardFilterDropdown extends StatelessWidget {
+  final double width;
+  final String label;
+  final String value;
+  final List<_BoardFilterOption> options;
+  final ValueChanged<String> onChanged;
+
+  const _BoardFilterDropdown({
+    required this.width,
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Container(
+        height: 50,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: value,
+            isExpanded: true,
+            menuMaxHeight: 280,
+            borderRadius: BorderRadius.circular(16),
+            icon: const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 20,
+              color: Color(0xFF4B5563),
+            ),
+            selectedItemBuilder: (context) {
+              return options.map((option) {
+                return _BoardSelectedFilterValue(
+                  label: label,
+                  value: option.label,
+                );
+              }).toList();
+            },
+            items: options.map((option) {
+              return DropdownMenuItem<String>(
+                value: option.value,
+                child: Text(
+                  option.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF111827),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              );
+            }).toList(),
+            onChanged: (nextValue) {
+              if (nextValue != null) onChanged(nextValue);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BoardSelectedFilterValue extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _BoardSelectedFilterValue({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFF6B7280),
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            height: 1,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFF111827),
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            height: 1,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BoardEmptyState extends StatelessWidget {
+  final String message;
+
+  const _BoardEmptyState({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF6B7280),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+InputDecoration _boardInputDecoration(String label, {IconData? icon}) {
+  return InputDecoration(
+    hintText: label,
+    prefixIcon: icon == null ? null : Icon(icon),
+    filled: true,
+    fillColor: const Color(0xFFF3F4F6),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide.none,
+    ),
+  );
 }
 
 class _BoardHeader extends StatelessWidget {
@@ -443,10 +924,7 @@ class _BoardHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Color(0xFF2563EB),
-            Color(0xFF9333EA),
-          ],
+          colors: [Color(0xFF2563EB), Color(0xFF9333EA)],
         ),
         borderRadius: BorderRadius.only(
           bottomLeft: Radius.circular(32),
@@ -557,10 +1035,7 @@ class _BoardHeader extends StatelessWidget {
                       color: Colors.white.withOpacity(0.16),
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: const Icon(
-                      Icons.tune_rounded,
-                      color: Colors.white,
-                    ),
+                    child: const Icon(Icons.tune_rounded, color: Colors.white),
                   ),
                 ),
             ],
@@ -617,10 +1092,7 @@ class _ColumnHeader extends StatelessWidget {
         Container(
           width: 11,
           height: 11,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 8),
         Expanded(
@@ -641,10 +1113,7 @@ class _ColumnHeader extends StatelessWidget {
           ),
           child: Text(
             '$count',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w900,
-            ),
+            style: TextStyle(color: color, fontWeight: FontWeight.w900),
           ),
         ),
       ],
@@ -667,15 +1136,13 @@ class _TaskCard extends StatelessWidget {
   final MockTask task;
   final bool isDragging;
 
-  const _TaskCard({
-    required this.task,
-    this.isDragging = false,
-  });
+  const _TaskCard({required this.task, this.isDragging = false});
 
   @override
   Widget build(BuildContext context) {
-    final progress =
-    task.checklistTotal == 0 ? 0.0 : task.checklistDone / task.checklistTotal;
+    final progress = task.checklistTotal == 0
+        ? 0.0
+        : task.checklistDone / task.checklistTotal;
 
     return Container(
       padding: const EdgeInsets.all(15),
@@ -836,9 +1303,7 @@ class _TaskCard extends StatelessWidget {
 class _PriorityBadge extends StatelessWidget {
   final String priority;
 
-  const _PriorityBadge({
-    required this.priority,
-  });
+  const _PriorityBadge({required this.priority});
 
   @override
   Widget build(BuildContext context) {
@@ -864,20 +1329,14 @@ class _PriorityBadge extends StatelessWidget {
   _PriorityConfig _getPriorityConfig(String priority) {
     switch (priority) {
       case 'High':
-        return _PriorityConfig(
-          label: 'Cao',
-          color: const Color(0xFFEF4444),
-        );
+        return _PriorityConfig(label: 'Cao', color: const Color(0xFFEF4444));
       case 'Medium':
         return _PriorityConfig(
           label: 'Trung bình',
           color: const Color(0xFFF59E0B),
         );
       default:
-        return _PriorityConfig(
-          label: 'Thấp',
-          color: const Color(0xFF22C55E),
-        );
+        return _PriorityConfig(label: 'Thấp', color: const Color(0xFF22C55E));
     }
   }
 }
@@ -886,18 +1345,13 @@ class _PriorityConfig {
   final String label;
   final Color color;
 
-  _PriorityConfig({
-    required this.label,
-    required this.color,
-  });
+  _PriorityConfig({required this.label, required this.color});
 }
 
 class _EmptyColumn extends StatelessWidget {
   final String columnName;
 
-  const _EmptyColumn({
-    required this.columnName,
-  });
+  const _EmptyColumn({required this.columnName});
 
   @override
   Widget build(BuildContext context) {
@@ -907,9 +1361,7 @@ class _EmptyColumn extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: const Color(0xFFE5E7EB),
-          ),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
