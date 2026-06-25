@@ -4,6 +4,7 @@ import '../../data/mock_tasks.dart';
 import '../../data/mock_users.dart';
 import '../../data/mock_workspaces.dart';
 import '../../services/app_data_service.dart';
+import '../../utils/search_utils.dart';
 import '../task/task_detail_screen.dart';
 import 'user_approval_requests_screen.dart';
 
@@ -25,6 +26,9 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
   String selectedProject = 'all';
   String selectedStatus = 'all';
   String selectedPriority = 'all';
+  String selectedChecklistCount = 'all';
+  String selectedCommentCount = 'all';
+  String selectedTaskSort = 'az';
   bool isLoading = true;
 
   @override
@@ -68,7 +72,7 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
   }
 
   List<MockTask> get filteredTasks {
-    return myTasks.where((task) {
+    final result = myTasks.where((task) {
       final projectIndex = projects.indexWhere(
         (project) => project.id == task.projectId,
       );
@@ -81,13 +85,56 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
       final statusOk = selectedStatus == 'all' || task.status == selectedStatus;
       final priorityOk =
           selectedPriority == 'all' || task.priority == selectedPriority;
-      final search = taskSearchController.text.trim().toLowerCase();
+      final search = normalizeSearchText(taskSearchController.text);
+      final projectName = normalizeSearchText(project?.name ?? '');
+      final workspaceName = project == null
+          ? ''
+          : normalizeSearchText(getWorkspaceName(project.workspaceId));
       final searchOk =
           search.isEmpty ||
-          task.title.toLowerCase().contains(search) ||
-          task.description.toLowerCase().contains(search);
-      return workspaceOk && projectOk && statusOk && priorityOk && searchOk;
+          normalizeSearchText(task.title).contains(search) ||
+          normalizeSearchText(task.description).contains(search) ||
+          projectName.contains(search) ||
+          workspaceName.contains(search);
+      final checklistOk = switch (selectedChecklistCount) {
+        'none' => task.checklistTotal == 0,
+        '1-5' => task.checklistTotal >= 1 && task.checklistTotal <= 5,
+        '6+' => task.checklistTotal >= 6,
+        _ => true,
+      };
+      final commentOk = switch (selectedCommentCount) {
+        'none' => task.commentCount == 0,
+        '1-3' => task.commentCount >= 1 && task.commentCount <= 3,
+        '4+' => task.commentCount >= 4,
+        _ => true,
+      };
+      return workspaceOk &&
+          projectOk &&
+          statusOk &&
+          priorityOk &&
+          searchOk &&
+          checklistOk &&
+          commentOk;
     }).toList();
+
+    result.sort((first, second) {
+      return switch (selectedTaskSort) {
+        'za' => normalizeSearchText(
+          second.title,
+        ).compareTo(normalizeSearchText(first.title)),
+        'checklistAsc' => first.checklistTotal.compareTo(second.checklistTotal),
+        'checklistDesc' => second.checklistTotal.compareTo(
+          first.checklistTotal,
+        ),
+        'commentsAsc' => first.commentCount.compareTo(second.commentCount),
+        'commentsDesc' => second.commentCount.compareTo(first.commentCount),
+        _ => normalizeSearchText(
+          first.title,
+        ).compareTo(normalizeSearchText(second.title)),
+      };
+    });
+
+    return result;
   }
 
   List<MockProject> get workspaceProjects {
@@ -95,6 +142,16 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
     return projects
         .where((project) => project.workspaceId == selectedWorkspace)
         .toList();
+  }
+
+  String getWorkspaceName(String workspaceId) {
+    try {
+      return workspaces
+          .firstWhere((workspace) => workspace.id == workspaceId)
+          .name;
+    } catch (_) {
+      return '';
+    }
   }
 
   int get completedTasks {
@@ -202,6 +259,9 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
               selectedProject: selectedProject,
               selectedStatus: selectedStatus,
               selectedPriority: selectedPriority,
+              selectedChecklistCount: selectedChecklistCount,
+              selectedCommentCount: selectedCommentCount,
+              selectedTaskSort: selectedTaskSort,
               onWorkspaceChanged: (value) {
                 setState(() {
                   selectedWorkspace = value;
@@ -225,6 +285,21 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
               onPriorityChanged: (value) {
                 setState(() {
                   selectedPriority = value;
+                });
+              },
+              onChecklistCountChanged: (value) {
+                setState(() {
+                  selectedChecklistCount = value;
+                });
+              },
+              onCommentCountChanged: (value) {
+                setState(() {
+                  selectedCommentCount = value;
+                });
+              },
+              onSortChanged: (value) {
+                setState(() {
+                  selectedTaskSort = value;
                 });
               },
               onSearchChanged: (_) => setState(() {}),
@@ -336,10 +411,16 @@ class _FilterCard extends StatelessWidget {
   final String selectedProject;
   final String selectedStatus;
   final String selectedPriority;
+  final String selectedChecklistCount;
+  final String selectedCommentCount;
+  final String selectedTaskSort;
   final ValueChanged<String> onWorkspaceChanged;
   final ValueChanged<String> onProjectChanged;
   final ValueChanged<String> onStatusChanged;
   final ValueChanged<String> onPriorityChanged;
+  final ValueChanged<String> onChecklistCountChanged;
+  final ValueChanged<String> onCommentCountChanged;
+  final ValueChanged<String> onSortChanged;
   final ValueChanged<String> onSearchChanged;
 
   const _FilterCard({
@@ -350,10 +431,16 @@ class _FilterCard extends StatelessWidget {
     required this.selectedProject,
     required this.selectedStatus,
     required this.selectedPriority,
+    required this.selectedChecklistCount,
+    required this.selectedCommentCount,
+    required this.selectedTaskSort,
     required this.onWorkspaceChanged,
     required this.onProjectChanged,
     required this.onStatusChanged,
     required this.onPriorityChanged,
+    required this.onChecklistCountChanged,
+    required this.onCommentCountChanged,
+    required this.onSortChanged,
     required this.onSearchChanged,
   });
 
@@ -366,6 +453,7 @@ class _FilterCard extends StatelessWidget {
         children: [
           DropdownButtonFormField<String>(
             value: selectedWorkspace,
+            isExpanded: true,
             decoration: _inputDecoration('Workspace'),
             items: [
               const DropdownMenuItem(
@@ -386,6 +474,7 @@ class _FilterCard extends StatelessWidget {
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: selectedProject,
+            isExpanded: true,
             decoration: _inputDecoration('Project'),
             items: [
               const DropdownMenuItem(
@@ -408,12 +497,13 @@ class _FilterCard extends StatelessWidget {
             controller: taskSearchController,
             onChanged: onSearchChanged,
             decoration: _inputDecoration(
-              'Tìm task trong project',
+              'Tìm task, project hoặc workspace',
             ).copyWith(prefixIcon: const Icon(Icons.search_rounded)),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: selectedStatus,
+            isExpanded: true,
             decoration: _inputDecoration('Trạng thái'),
             items: [
               const DropdownMenuItem(value: 'all', child: Text('Tất cả')),
@@ -428,6 +518,7 @@ class _FilterCard extends StatelessWidget {
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: selectedPriority,
+            isExpanded: true,
             decoration: _inputDecoration('Priority'),
             items: const [
               DropdownMenuItem(value: 'all', child: Text('Tất cả')),
@@ -437,6 +528,73 @@ class _FilterCard extends StatelessWidget {
             ],
             onChanged: (value) {
               if (value != null) onPriorityChanged(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: selectedChecklistCount,
+                  isExpanded: true,
+                  decoration: _inputDecoration('Checklist'),
+                  items: const [
+                    DropdownMenuItem(value: 'all', child: Text('Tất cả')),
+                    DropdownMenuItem(value: 'none', child: Text('0 item')),
+                    DropdownMenuItem(value: '1-5', child: Text('1 - 5 item')),
+                    DropdownMenuItem(value: '6+', child: Text('Từ 6 item')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) onChecklistCountChanged(value);
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: selectedCommentCount,
+                  isExpanded: true,
+                  decoration: _inputDecoration('Bình luận'),
+                  items: const [
+                    DropdownMenuItem(value: 'all', child: Text('Tất cả')),
+                    DropdownMenuItem(value: 'none', child: Text('0 comment')),
+                    DropdownMenuItem(value: '1-3', child: Text('1 - 3')),
+                    DropdownMenuItem(value: '4+', child: Text('Từ 4')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) onCommentCountChanged(value);
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: selectedTaskSort,
+            isExpanded: true,
+            decoration: _inputDecoration('Sắp xếp'),
+            items: const [
+              DropdownMenuItem(value: 'az', child: Text('Tên A - Z')),
+              DropdownMenuItem(value: 'za', child: Text('Tên Z - A')),
+              DropdownMenuItem(
+                value: 'checklistAsc',
+                child: Text('Ít checklist trước'),
+              ),
+              DropdownMenuItem(
+                value: 'checklistDesc',
+                child: Text('Nhiều checklist trước'),
+              ),
+              DropdownMenuItem(
+                value: 'commentsAsc',
+                child: Text('Ít bình luận trước'),
+              ),
+              DropdownMenuItem(
+                value: 'commentsDesc',
+                child: Text('Nhiều bình luận trước'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) onSortChanged(value);
             },
           ),
         ],

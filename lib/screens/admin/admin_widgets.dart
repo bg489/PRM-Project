@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../utils/search_utils.dart';
+
 class AdminScreenScaffold extends StatelessWidget {
   final String title;
   final IconData icon;
@@ -372,14 +374,5 @@ class _AdminStatCard extends StatelessWidget {
 }
 
 String normalizeAdminSearch(String value) {
-  return value
-      .trim()
-      .toLowerCase()
-      .replaceAll(RegExp(r'[àáạảãâầấậẩẫăằắặẳẵ]'), 'a')
-      .replaceAll(RegExp(r'[èéẹẻẽêềếệểễ]'), 'e')
-      .replaceAll(RegExp(r'[ìíịỉĩ]'), 'i')
-      .replaceAll(RegExp(r'[òóọỏõôồốộổỗơờớợởỡ]'), 'o')
-      .replaceAll(RegExp(r'[ùúụủũưừứựửữ]'), 'u')
-      .replaceAll(RegExp(r'[ỳýỵỷỹ]'), 'y')
-      .replaceAll('đ', 'd');
+  return normalizeSearchText(value);
 }
